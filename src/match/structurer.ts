@@ -75,6 +75,12 @@ export function extractPrices(text: string): number[] {
   return prices;
 }
 
+export function extractMoq(text: string): number | undefined {
+  const m = text.match(/moq\s*[:=]?\s*(\d[\d,.]*)|minimum\s+order\s*(?:quantity|qty)?\s*[:=]?\s*(\d[\d,.]*)/i);
+  const raw = m?.[1] ?? m?.[2];
+  return raw !== undefined ? Number(raw.replace(/,/g, '')) : undefined;
+}
+
 export function extractRegion(text: string): string | undefined {
   const lower = text.toLowerCase();
   for (const { region, keywords } of REGION_KEYWORDS) {
@@ -104,10 +110,12 @@ export function structureOffer(signal: Signal): SupplierOfferInput {
   const text = `${signal.title} ${signal.content}`;
   const prices = extractPrices(text);
   const region = extractRegion(text);
+  const moq = extractMoq(text);
   return {
     title: signal.title,
     category: extractCategory(text),
     ...(prices[0] !== undefined ? { price: prices[0] } : {}),
+    ...(moq !== undefined ? { moq } : {}),
     ...(region ? { region } : {}),
     description: signal.content,
     sourceSignalId: signal.id,

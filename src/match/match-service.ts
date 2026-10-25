@@ -100,6 +100,35 @@ export class MatchService {
     return entity;
   }
 
+  /** Build an explainable introduction for a match (feeds the outreach flow). */
+  async buildIntroduction(matchId: string): Promise<{ subject: string; text: string }> {
+    const match = await this.repo.getMatch(matchId);
+    if (!match) throw Errors.notFound(`match ${matchId}`);
+    const demand = await this.repo.getBuyerDemand(match.buyerDemandId);
+    const offer = await this.repo.getSupplierOffer(match.supplierOfferId);
+    if (!demand || !offer) throw Errors.notFound(`match ${matchId} entity missing`);
+
+    const reasons = Object.entries(match.reasons)
+      .map(([dimension, value]) => `${dimension}: ${value}`)
+      .join(', ');
+
+    return {
+      subject: `Match: ${demand.title} ↔ ${offer.title}`,
+      text: [
+        'Buyer demand:',
+        `  ${demand.title}`,
+        `  category: ${demand.category}, quantity: ${demand.quantity ?? '-'}, price: ${formatPrice(demand.priceMin, demand.priceMax, demand.currency)}, region: ${demand.region ?? '-'}`,
+        '',
+        'Supplier offer:',
+        `  ${offer.title}`,
+        `  category: ${offer.category}, price: ${formatPrice(offer.price, undefined, offer.currency)}, MOQ: ${offer.moq ?? '-'}, region: ${offer.region ?? '-'}`,
+        '',
+        `Match score: ${match.score} / 100`,
+        `  ${reasons}`,
+      ].join('\n'),
+    };
+  }
+
   private async setMatchStatus(id: string, status: 'accepted' | 'rejected'): Promise<Match> {
     const changes = await this.repo.setMatchStatus(id, status, this.now());
     if (changes === 0) throw Errors.notFound(`match ${id}`);
@@ -107,4 +136,10 @@ export class MatchService {
     if (!updated) throw Errors.notFound(`match ${id}`);
     return updated;
   }
+}
+
+function formatPrice(min: number | undefined, max: number | undefined, currency: string): string {
+  if (min === undefined && max === undefined) return '-';
+  if (min !== undefined && max !== undefined && min !== max) return `${min}-${max} ${currency}`;
+  return `${min ?? max} ${currency}`;
 }

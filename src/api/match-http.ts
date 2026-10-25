@@ -74,6 +74,10 @@ export function createMatchApp(deps: MatchAppDeps): Hono {
 
   app.get('/api/v1/match/matches', async (c) => c.json(await deps.service.listMatches()));
 
+  app.get('/api/v1/match/matches/:id/introduction', async (c) =>
+    c.json(await deps.service.buildIntroduction(c.req.param('id'))),
+  );
+
   app.post('/api/v1/match/matches/:id/accept', async (c) =>
     c.json(await deps.service.acceptMatch(c.req.param('id'))),
   );
