@@ -21,6 +21,9 @@ import { createMailPort } from './mail/registry.js';
 import { TemplateDraftWriter } from './outreach/content.js';
 import { OutreachRepository } from './outreach/repository.js';
 import { OutreachService } from './outreach/outreach-service.js';
+import { createMatchApp } from './api/match-http.js';
+import { MatchRepository } from './match/repository.js';
+import { MatchService } from './match/match-service.js';
 
 async function createDriver(): Promise<StorageDriver> {
   const config = loadConfig();
@@ -61,10 +64,14 @@ async function main(): Promise<void> {
     mail: createMailPort(config),
   });
 
+  const matchRepo = new MatchRepository(driver);
+  const matchService = new MatchService({ repo: matchRepo });
+
   const app = new Hono();
   app.route('/', createResearchApp({ service: researchService, apiToken: config.apiToken }));
   app.route('/', createCrmApp({ service: crmService, apiToken: config.apiToken }));
   app.route('/', createOutreachApp({ service: outreachService, apiToken: config.apiToken }));
+  app.route('/', createMatchApp({ service: matchService, apiToken: config.apiToken }));
 
   serve({ fetch: app.fetch, hostname: config.host, port: config.port }, () => {
     console.log(

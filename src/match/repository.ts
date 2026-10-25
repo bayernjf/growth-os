@@ -243,6 +243,14 @@ export class MatchRepository {
     return row ? this.mapMatch(row) : undefined;
   }
 
+  async findMatchByPair(buyerDemandId: string, supplierOfferId: string): Promise<Match | undefined> {
+    const row = await this.driver.get<MatchRow>(
+      'SELECT * FROM matches WHERE buyer_demand_id = ? AND supplier_offer_id = ?',
+      [buyerDemandId, supplierOfferId],
+    );
+    return row ? this.mapMatch(row) : undefined;
+  }
+
   async listMatches(): Promise<Match[]> {
     const rows = await this.driver.all<MatchRow>('SELECT * FROM matches ORDER BY score DESC, created_at ASC');
     return rows.map((r) => this.mapMatch(r));

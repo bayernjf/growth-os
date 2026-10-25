@@ -1,0 +1,86 @@
+import { Hono } from 'hono';
+import type { ContentfulStatusCode } from 'hono/utils/http-status';
+import { GrowthError } from '../research/errors.js';
+import type { MatchService } from '../match/match-service.js';
+
+export interface MatchAppDeps {
+  service: MatchService;
+  apiToken?: string | undefined;
+}
+
+export function createMatchApp(deps: MatchAppDeps): Hono {
+  const app = new Hono();
+
+  app.use('/api/v1/*', async (c, next) => {
+    if (deps.apiToken) {
+      const header = c.req.header('Authorization') ?? '';
+      if (header !== `Bearer ${deps.apiToken}`) {
+        return c.json({ code: 'UNAUTHORIZED', message: 'missing or invalid token', retryable: false }, 401);
+      }
+    }
+    await next();
+  });
+
+  app.onError((err, c) => {
+    if (err instanceof GrowthError) {
+      return c.json(err.toBody(), err.status as ContentfulStatusCode);
+    }
+    return c.json(
+      { code: 'INTERNAL', message: err instanceof Error ? err.message : 'unknown error', retryable: false },
+      500,
+    );
+  });
+
+  // buyer demands
+  app.post('/api/v1/match/demands', async (c) => {
+    const body = (await c.req.json()) as Record<string, unknown>;
+    const demand = await deps.service.createDemand({
+      title: String(body.title ?? ''),
+      category: String(body.category ?? ''),
+      ...(body.quantity !== undefined ? { quantity: String(body.quantity) } : {}),
+      ...(body.priceMin !== undefined ? { priceMin: Number(body.priceMin) } : {}),
+      ...(body.priceMax !== undefined ? { priceMax: Number(body.priceMax) } : {}),
+      ...(body.currency !== undefined ? { currency: String(body.currency) } : {}),
+      ...(body.deadline !== undefined ? { deadline: String(body.deadline) } : {}),
+      ...(body.region !== undefined ? { region: String(body.region) } : {}),
+      ...(body.description !== undefined ? { description: String(body.description) } : {}),
+    });
+    return c.json(demand, 201);
+  });
+
+  app.get('/api/v1/match/demands', async (c) => c.json(await deps.service.listDemands()));
+
+  // supplier offers
+  app.post('/api/v1/match/offers', async (c) => {
+    const body = (await c.req.json()) as Record<string, unknown>;
+    const offer = await deps.service.createOffer({
+      title: String(body.title ?? ''),
+      category: String(body.category ?? ''),
+      ...(body.capacity !== undefined ? { capacity: String(body.capacity) } : {}),
+      ...(body.price !== undefined ? { price: Number(body.price) } : {}),
+      ...(body.currency !== undefined ? { currency: String(body.currency) } : {}),
+      ...(body.moq !== undefined ? { moq: Number(body.moq) } : {}),
+      ...(body.region !== undefined ? { region: String(body.region) } : {}),
+      ...(body.credentials !== undefined ? { credentials: String(body.credentials) } : {}),
+      ...(body.description !== undefined ? { description: String(body.description) } : {}),
+    });
+    return c.json(offer, 201);
+  });
+
+  app.get('/api/v1/match/offers', async (c) => c.json(await deps.service.listOffers()));
+
+  // run matching
+  app.post('/api/v1/match/run', async (c) => c.json(await deps.service.runMatch()));
+
+  app.get('/api/v1/match/matches', async (c) => c.json(await deps.service.listMatches()));
+
+  app.post('/api/v1/match/matches/:id/accept', async (c) =>
+    c.json(await deps.service.acceptMatch(c.req.param('id'))),
+  );
+
+  app.post('/api/v1/match/matches/:id/reject', async (c) =>
+    c.json(await deps.service.rejectMatch(c.req.param('id'))),
+  );
+
+  return app;
+}
