@@ -6,7 +6,7 @@
 
 - **GATE-G2 已过门**（2026-10-25，owner 复核）：五门全绿（38 用例/6 文件、typecheck/lint/build/迁移配对 0 错，node 22 复核）；真实服务冒烟 **16/16**（15 信号→1 线索[分数与源信号一致、带证据]→状态机合法流转+非法 409→promote 幂等→followup 到期进 watch/due、完成后消失→lead_events 审计 1 条）。
 - **G3 已签核（2026-10-25 owner），已落码并过门**：邮件通道 **SMTP 优先**（厂商中立、全球可用；Gmail/飞书后续适配器）。详细设计见 bayjf `docs/tier0/growth-os-设计方案.md` v1.2 §13。T-G3-01（zeus-client DecisionPort）、T-G3-02（MailPort + SMTP 适配器）、T-G3-03/04（campaign 草稿 + zeus 签核发送流）、T-G3-05（回执跟踪/suppress）、T-G3-06（GATE-G3）已落码；**GATE-G3 已过门**。
-- **G5 撮合引擎（2026-10-25）已落码并过门**：`match/`（买方需求/卖方货源/匹配对 + 信号结构化 + 五维打分 + 编排）+ `005_match` 迁移 3 表；真实服务冒烟 **7/7**（healthz→建需求/货源→run 匹配 1 对 score 90→reasons 可解释→accept）。
+- **G5 撮合引擎（2026-10-25）已落码并过门**：`match/`（买方需求/卖方货源/匹配对 + 信号结构化 + 五维打分 + 编排 + 撮合介绍）+ `005_match` 迁移 3 表；真实服务冒烟 **8/8**（healthz→建需求/货源→run 匹配 1 对 score 90→reasons 可解释→介绍渲染→accept）。
 - **跨境合规**：设计方案 v1.1 新增 §14 全球化与跨境合规硬约束（数据最小化、PII 出域控制、CAN-SPAM/CASL/GDPR ePrivacy、suppress list、打开跟踪默认关闭）；G3 落码时强制执行。
 - **定级**：growth-os 已登记 bayjf `docs/PROJECT-TIER-CONVENTION.md` Tier 0。
 - **注意**：本机默认 shell node 20 跑不了测试（`node:sqlite` 需 22.5+），用 `fnm use 22` 后再跑五门。
@@ -73,7 +73,8 @@
 - T-G5-02 信号结构化：`match/structurer.ts`（classifySignal demand/offer/unknown + extractCategory/Quantity/Prices/Region，规则优先、缺字段不硬填）。
 - T-G5-03 匹配引擎：`match/matcher.ts`（五维打分：品类40/数量20/价格20/交期10/地区10，纯函数可解释）。
 - T-G5-04 编排 + API：`match/match-service.ts`（create/runMatch/accept/reject/ingestSignal，score≥60 幂等）+ `api/match-http.ts`（8 路由）+ serve 装配。
-- T-G5-05 撮合闭环 + GATE-G5：`match-e2e.test.ts` 需求信号+货源信号→撮合；真实服务冒烟 7/7。
+- T-G5-05 撮合闭环 + GATE-G5：`match-e2e.test.ts` 需求信号+货源信号→撮合；真实服务冒烟 8/8。
+- 撮合联系（FR-22）：`MatchService.buildIntroduction(matchId)` 生成撮合介绍（subject+text，含双方信息+分数理由），`GET /api/v1/match/matches/:id/introduction`，复用 G3 outreach 签核发送。
 
 ## 测试覆盖（tests/，14 文件 / 81 用例）
 
