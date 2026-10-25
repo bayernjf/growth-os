@@ -8,6 +8,7 @@ import type {
   OutreachDraft,
   OutreachEvent,
   OutreachEventType,
+  SuppressedEmail,
 } from './types.js';
 
 interface CampaignRow {
@@ -40,6 +41,12 @@ interface EventRow {
   decision_id: string | null;
   message_id: string | null;
   note: string;
+  created_at: string;
+}
+
+interface SuppressedRow {
+  email: string;
+  reason: string;
   created_at: string;
 }
 
@@ -229,5 +236,39 @@ export class OutreachRepository {
       note: row.note,
       createdAt: row.created_at,
     };
+  }
+
+  // ---------- suppressed emails (receipts) ----------
+
+  async addSuppressed(email: string, reason: string, now?: string): Promise<void> {
+    const ts = now ?? new Date().toISOString();
+    const existing = await this.driver.get<{ email: string }>(
+      'SELECT email FROM suppressed_emails WHERE email = ?',
+      [email],
+    );
+    if (existing) return;
+    await this.driver.run('INSERT INTO suppressed_emails (email, reason, created_at) VALUES (?,?,?)', [
+      email,
+      reason,
+      ts,
+    ]);
+  }
+
+  async isSuppressed(email: string): Promise<boolean> {
+    const row = await this.driver.get<{ email: string }>(
+      'SELECT email FROM suppressed_emails WHERE email = ?',
+      [email],
+    );
+    return row !== undefined;
+  }
+
+  async listSuppressed(): Promise<SuppressedEmail[]> {
+    const rows = await this.driver.all<SuppressedRow>('SELECT * FROM suppressed_emails ORDER BY created_at DESC');
+    return rows.map((r) => ({ email: r.email, reason: r.reason, createdAt: r.created_at }));
+  }
+
+  async findDraftByMessageId(messageId: string): Promise<OutreachDraft | undefined> {
+    const row = await this.driver.get<DraftRow>('SELECT * FROM outreach_drafts WHERE message_id = ?', [messageId]);
+    return row ? this.mapDraft(row) : undefined;
   }
 }

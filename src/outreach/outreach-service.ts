@@ -2,17 +2,18 @@
 // without zeus sign-off": a draft must pass submit -> zeus approval before the
 // mail port is ever called. growth-os never grades a decision locally.
 
-import type { Contact, Lead } from '../crm/types.js';
+import type { Contact, Lead, LeadFollowup, LeadFollowupInput } from '../crm/types.js';
 import type { DecisionPort } from '../decision/types.js';
 import type { MailPort } from '../mail/types.js';
 import { Errors } from '../research/errors.js';
 import type { DraftWriter } from './content.js';
 import type { OutreachRepository } from './repository.js';
-import type { Campaign, CampaignInput, OutreachDraft, OutreachEvent } from './types.js';
+import type { Campaign, CampaignInput, OutreachDraft, OutreachEvent, SuppressedEmail } from './types.js';
 
 export interface LeadSource {
   getLead(id: string): Promise<Lead | undefined>;
   getContact(id: string): Promise<Contact | undefined>;
+  addFollowup(leadId: string, input: LeadFollowupInput): Promise<LeadFollowup>;
 }
 
 export interface OutreachServiceDeps {
@@ -138,6 +139,9 @@ export class OutreachService {
     if (draft.status !== 'approved') {
       throw Errors.conflict('outbound requires zeus sign-off: draft is not approved');
     }
+    if (await this.repo.isSuppressed(draft.toEmail)) {
+      throw Errors.conflict('recipient is suppressed; will not send');
+    }
     const sent = await this.mail.send({
       to: draft.toEmail,
       subject: draft.subject,
@@ -157,6 +161,30 @@ export class OutreachService {
 
   listEvents(draftId: string): Promise<OutreachEvent[]> {
     return this.repo.listEvents(draftId);
+  }
+
+  // ---------- receipts (T-G3-05) ----------
+
+  suppressEmail(email: string, reason: string): Promise<void> {
+    return this.repo.addSuppressed(email, reason, this.now());
+  }
+
+  listSuppressed(): Promise<SuppressedEmail[]> {
+    return this.repo.listSuppressed();
+  }
+
+  /** A bounce hard-suppresses the address so it is never sent again. */
+  recordBounce(email: string): Promise<void> {
+    return this.repo.addSuppressed(email, 'bounce', this.now());
+  }
+
+  /** A reply reflows back to the lead as a review follow-up. */
+  async recordReply(messageId: string, from: string, text: string): Promise<LeadFollowup> {
+    const draft = await this.repo.findDraftByMessageId(messageId);
+    if (!draft) throw Errors.notFound(`draft with messageId ${messageId}`);
+    const lead = await this.leads.getLead(draft.leadId);
+    if (!lead) throw Errors.notFound(`lead ${draft.leadId}`);
+    return this.leads.addFollowup(lead.id, { action: 'reply', note: `from ${from}: ${text}` });
   }
 
   private async mustGetDraft(id: string): Promise<OutreachDraft> {

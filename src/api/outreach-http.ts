@@ -72,5 +72,36 @@ export function createOutreachApp(deps: OutreachAppDeps): Hono {
     c.json(await deps.service.listEvents(c.req.param('id'))),
   );
 
+  // receipts (T-G3-05)
+  app.post('/api/v1/outreach/suppress', async (c) => {
+    const body = (await c.req.json()) as Record<string, unknown>;
+    const email = String(body.email ?? '');
+    if (!email) throw new GrowthError('VALIDATION_FAILED', 'email is required', 400);
+    await deps.service.suppressEmail(email, body.reason !== undefined ? String(body.reason) : 'manual');
+    return c.json({ ok: true });
+  });
+
+  app.get('/api/v1/outreach/suppressed', async (c) => c.json(await deps.service.listSuppressed()));
+
+  app.post('/api/v1/outreach/receipts/bounce', async (c) => {
+    const body = (await c.req.json()) as Record<string, unknown>;
+    const email = String(body.email ?? '');
+    if (!email) throw new GrowthError('VALIDATION_FAILED', 'email is required', 400);
+    await deps.service.recordBounce(email);
+    return c.json({ ok: true });
+  });
+
+  app.post('/api/v1/outreach/receipts/reply', async (c) => {
+    const body = (await c.req.json()) as Record<string, unknown>;
+    const messageId = String(body.messageId ?? '');
+    if (!messageId) throw new GrowthError('VALIDATION_FAILED', 'messageId is required', 400);
+    const followup = await deps.service.recordReply(
+      messageId,
+      String(body.from ?? ''),
+      String(body.text ?? ''),
+    );
+    return c.json(followup, 201);
+  });
+
   return app;
 }

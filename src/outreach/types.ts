@@ -42,3 +42,9 @@ export interface OutreachEvent {
   note: string;
   createdAt: string;
 }
+
+export interface SuppressedEmail {
+  email: string;
+  reason: string;
+  createdAt: string;
+}
