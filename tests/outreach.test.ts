@@ -190,3 +190,44 @@ describe('zero outbound without zeus (strong negative proof)', () => {
     expect(stack.mail.sent).toHaveLength(0);
   });
 });
+
+describe('receipts and suppression (T-G3-05)', () => {
+  it('suppresses a bounced address so a later send fails closed', async () => {
+    const stack = await makeStack();
+    const { lead } = await seedLead(stack.crmRepo);
+    const { drafts } = await stack.service.createCampaign({ name: 'intro' }, [lead.id]);
+    const draft = drafts[0]!;
+    await stack.service.submitDraft(draft.id);
+    (stack.decision as FakeDecisionPort).verdicts['dec_1'] = 'approved';
+    await stack.service.checkApproval(draft.id);
+
+    await stack.service.recordBounce('jane@acme.com');
+    await expect(stack.service.sendDraft(draft.id)).rejects.toMatchObject({ code: 'CONFLICT', status: 409 });
+    expect(stack.mail.sent).toHaveLength(0);
+    expect(await stack.service.listSuppressed()).toEqual([
+      { email: 'jane@acme.com', reason: 'bounce', createdAt: FIXED_NOW },
+    ]);
+  });
+
+  it('records a reply as a lead follow-up for review', async () => {
+    const stack = await makeStack();
+    const { lead } = await seedLead(stack.crmRepo);
+    const { drafts } = await stack.service.createCampaign({ name: 'intro' }, [lead.id]);
+    const draft = drafts[0]!;
+    await stack.service.submitDraft(draft.id);
+    (stack.decision as FakeDecisionPort).verdicts['dec_1'] = 'approved';
+    await stack.service.checkApproval(draft.id);
+    await stack.service.sendDraft(draft.id);
+
+    const followup = await stack.service.recordReply('msg_1', 'jane@acme.com', 'Interested, call me.');
+    expect(followup).toMatchObject({ leadId: lead.id, action: 'reply' });
+    expect(followup.note).toContain('Interested, call me.');
+  });
+
+  it('fails closed on a reply for an unknown message id', async () => {
+    const stack = await makeStack();
+    await expect(stack.service.recordReply('unknown', 'x@y.com', 'hi')).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    });
+  });
+});
