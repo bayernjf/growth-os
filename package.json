@@ -21,7 +21,8 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.13.0",
-    "hono": "^4.13.13"
+    "hono": "^4.13.13",
+    "zeus-client": "file:../zeus/packages/zeus-client"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",

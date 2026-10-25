@@ -18,6 +18,9 @@ export interface AppConfig {
   searchMode: 'offline' | 'online';
   searchBaseUrl?: string | undefined;
   searchApiKey?: string | undefined;
+  zeusMode: 'off' | 'online';
+  zeusUrl?: string | undefined;
+  zeusToken?: string | undefined;
   leadMinScore: number;
   scoring: ScoringConfig;
 }
@@ -32,6 +35,7 @@ function num(name: string, fallback: number): number {
 export function loadConfig(): AppConfig {
   const dbDriver = process.env.GROWTH_DB_DRIVER === 'postgres' ? 'postgres' : 'sqlite';
   const searchMode = process.env.GROWTH_SEARCH_MODE === 'online' ? 'online' : 'offline';
+  const zeusMode = process.env.GROWTH_ZEUS_MODE === 'online' ? 'online' : 'off';
   return {
     host: process.env.GROWTH_HOST ?? '127.0.0.1',
     port: num('GROWTH_PORT', 8788),
@@ -41,6 +45,9 @@ export function loadConfig(): AppConfig {
     searchMode,
     searchBaseUrl: process.env.GROWTH_SEARCH_BASE_URL || undefined,
     searchApiKey: process.env.GROWTH_SEARCH_API_KEY || undefined,
+    zeusMode,
+    zeusUrl: process.env.GROWTH_ZEUS_URL || undefined,
+    zeusToken: process.env.GROWTH_ZEUS_TOKEN || undefined,
     leadMinScore: num('LEAD_MIN_SCORE', 60),
     scoring: {
       weights: { type: 0.45, source: 0.2, fresh: 0.15, keyword: 0.2 },
