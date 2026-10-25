@@ -2,15 +2,15 @@
 
 > 状态主入口。开工前先读；每完成一个工作单元立即更新（已完成划掉、待办保留）。
 
-## Current state（2026-10-25，G1/G2 已落码且双双过门；G3 已签核，落码中）
+## Current state（2026-10-25，G1/G2/G3 已落码且过门；G4 运营化待排）
 
 - **GATE-G2 已过门**（2026-10-25，owner 复核）：五门全绿（38 用例/6 文件、typecheck/lint/build/迁移配对 0 错，node 22 复核）；真实服务冒烟 **16/16**（15 信号→1 线索[分数与源信号一致、带证据]→状态机合法流转+非法 409→promote 幂等→followup 到期进 watch/due、完成后消失→lead_events 审计 1 条）。
-- **G3 已签核（2026-10-25 owner），落码中**：邮件通道 **SMTP 优先**（厂商中立、全球可用；Gmail/飞书后续适配器）。详细设计见 bayjf `docs/tier0/growth-os-设计方案.md` v1.2 §13。T-G3-01（zeus-client DecisionPort）、T-G3-02（MailPort + SMTP 适配器）、T-G3-03/04（campaign 草稿 + zeus 签核发送流）已落码。
+- **G3 已签核（2026-10-25 owner），已落码并过门**：邮件通道 **SMTP 优先**（厂商中立、全球可用；Gmail/飞书后续适配器）。详细设计见 bayjf `docs/tier0/growth-os-设计方案.md` v1.2 §13。T-G3-01（zeus-client DecisionPort）、T-G3-02（MailPort + SMTP 适配器）、T-G3-03/04（campaign 草稿 + zeus 签核发送流）、T-G3-05（回执跟踪/suppress）、T-G3-06（GATE-G3）已落码；**GATE-G3 已过门**。
 - **跨境合规**：设计方案 v1.1 新增 §14 全球化与跨境合规硬约束（数据最小化、PII 出域控制、CAN-SPAM/CASL/GDPR ePrivacy、suppress list、打开跟踪默认关闭）；G3 落码时强制执行。
 - **定级**：growth-os 已登记 bayjf `docs/PROJECT-TIER-CONVENTION.md` Tier 0。
 - **注意**：本机默认 shell node 20 跑不了测试（`node:sqlite` 需 22.5+），用 `fnm use 22` 后再跑五门。
 
-- **基线**：9 个测试文件 / **54 用例全绿**；`typecheck` 0 错；`lint` 0 错；`tsc -p tsconfig.build.json` 构建出 `dist/`；sqlite + postgres 迁移各 3 份（`001_research`、`002_crm`、`003_outreach`，配对）。
+- **基线**：9 个测试文件 / **57 用例全绿**；`typecheck` 0 错；`lint` 0 错；`tsc -p tsconfig.build.json` 构建出 `dist/`；sqlite + postgres 迁移各 4 份（`001_research`、`002_crm`、`003_outreach`、`004_outreach`，配对）。
 - **G1 已落码并实测通过**：
   - 只读搜索连接器 `research/provider/`：`OfflineSearchProvider`（确定性回放 `recordings/search/fixtures.json`，默认）、`OnlineSearchProvider`（Tavily 风格 REST，GET 只读）、`registry`（online 缺凭据 → 拒绝型 provider，run 返回 422，**不静默回退离线**）。
   - 信号引擎：`collector.ts`（规范化 + 指纹去重，指纹 = sha256(规范化 URL) 截 16）、`scoring.ts`（0–100 确定性打分，类型/来源/新鲜度/关键词四项加权，分项可解释，新鲜度半衰期 30 天、无日期取中性 0.5）。
@@ -57,16 +57,18 @@
 - T-G2-05 回访 watch（WatchPort + LocalWatch 本地桩）
 - T-G2-06 外部 CRM 单向同步（已拍板：跳过，用自带 CRM；G4 再评估）
 
-### G3（T-G3-01~04 完成；T-G3-05~06 进行中）
+### G3（T-G3-01~06 全部完成；GATE-G3 已过门）
 
 - T-G3-01 接入 zeus-client + DecisionPort：`decision/`（`types.ts` DecisionPort 端口 / `zeus.ts` ZeusDecisionAdapter / `registry.ts`）；`GROWTH_ZEUS_MODE=off` 默认无决策后端、offline 端口 fail-closed 503，online 缺凭据 422；zeus-client 不可达/非 2xx 映射 `DECISION_UNAVAILABLE` 503（retryable）。
 - T-G3-02 邮件通道适配器：`mail/`（`types.ts` MailPort + OutboundEmail / `smtp.ts` SmtpMailAdapter（nodemailer，STARTTLS 587 / 隐式 TLS 465）/ `registry.ts`）；`GROWTH_MAIL_MODE=off` 默认无外发、offline 端口 fail-closed 503，smtp 缺 host/from 422；send 失败映射 `MAIL_UNAVAILABLE` 503。
 - T-G3-03 campaign/草稿：`outreach/content.ts` DraftWriter 端口 + TemplateDraftWriter（本地确定性个性化；loom ContentClient 为后续可选适配器）。
 - T-G3-04 签核发送流：`outreach/outreach-service.ts`（submit→zeus 分级→approval→mail 发送）+ `003_outreach` 迁移 3 表（campaigns/outreach_drafts/outreach_events）+ `api/outreach-http.ts`（8 路由）；**无 zeus 签核零外发**（send 仅当 approved，decisionId/messageId 全程审计）。
+- T-G3-05 回执跟踪：`004_outreach` 迁移 `suppressed_emails`；退信→suppress（再发送被拦）、回复→lead followup 回流、打开跟踪默认关闭（无 pixel，§14.2）。
+- T-G3-06 端到端 + GATE-G3：真实服务冒烟 7/7（healthz→contact/lead/campaign→draft→submit 503 DECISION_UNAVAILABLE→send 409 CONFLICT→审计仅 created）；**无 zeus 签核零外发**强反证通过；approve→send 全链路 + 审计回放由 `outreach.test.ts` 覆盖。
 
-## 测试覆盖（tests/，9 文件 / 54 用例）
+## 测试覆盖（tests/，9 文件 / 57 用例）
 
-- `outreach.test.ts`（5）：campaign/草稿创建、无邮箱 lead 跳过、submit→approve→send 审计链、reject、zeus off 零外发强反证。
+- `outreach.test.ts`（8）：campaign/草稿创建、无邮箱 lead 跳过、submit→approve→send 审计链、reject、zeus off 零外发强反证、退信 suppress 拦发送、回复回流 followup、未知 messageId 404。
 - `mail.test.ts`（5）：off 模式 fail-closed 503、smtp 缺 host/from 422、live 适配器、jsonTransport 发送返回 messageId、send 失败 → MAIL_UNAVAILABLE 503。
 - `decision.test.ts`（6）：off 模式 fail-closed 503、online 缺凭据 422、live 适配器、decide 返回分级、网络失败/非 2xx → DECISION_UNAVAILABLE 503。
 - `scoring.test.ts`（5）：高分上限、低词命中、无日期中性、衰减、区间与分项一致性。
@@ -83,7 +85,8 @@
 - [x] G3 签核：已签核（2026-10-25 owner，SMTP 优先 + 签核发送流 + 回执跟踪），落码 T-G3-01~06 进行中。
 - [x] 真实搜索源：已拍板 **Tavily**（2026-10-25）；key 由 owner 填 env（`GROWTH_SEARCH_MODE=online` + `GROWTH_SEARCH_BASE_URL` + `GROWTH_SEARCH_API_KEY`），不入库。现有 online provider 即 Tavily 风格，无需改码。
 - [x] T-G2-06 外部 CRM：跳过（2026-10-25，用 growth-os 自带 CRM，暂不接 HubSpot/表格；G4 运营化再评估）。
-- [ ] G3 邮件触达（T-G3-01~04 完成；T-G3-05~06 进行中，默认 D2；强制执行设计方案 §14.2 邮件合规）。
+- [x] GATE-G3：已过门（2026-10-25，57 用例 + 真实服务冒烟 7/7 零外发强反证）。
+- [x] G3 邮件触达（T-G3-01~06 全部完成，默认 D2；强制执行设计方案 §14.2 邮件合规）。
 - [ ] G4 运营化（外部依赖：真实云/域名/密钥/合规；含 SPF/DKIM/DMARC 与跨境数据评估）。
 
 ## 环境/运行
