@@ -2,7 +2,7 @@
 // without zeus sign-off": a draft must pass submit -> zeus approval before the
 // mail port is ever called. growth-os never grades a decision locally.
 
-import type { Contact, Lead, LeadFollowup, LeadFollowupInput } from '../crm/types.js';
+import type { Contact, ContactInput, Lead, LeadFollowup, LeadFollowupInput, LeadInput } from '../crm/types.js';
 import type { DecisionPort } from '../decision/types.js';
 import type { MailPort } from '../mail/types.js';
 import { Errors } from '../research/errors.js';
@@ -14,6 +14,8 @@ export interface LeadSource {
   getLead(id: string): Promise<Lead | undefined>;
   getContact(id: string): Promise<Contact | undefined>;
   addFollowup(leadId: string, input: LeadFollowupInput): Promise<LeadFollowup>;
+  createContact(input: ContactInput): Promise<Contact>;
+  createLead(input: LeadInput): Promise<Lead>;
 }
 
 export interface OutreachServiceDeps {
@@ -64,6 +66,21 @@ export class OutreachService {
       drafts.push(draft);
     }
     return { campaign, drafts };
+  }
+
+  /** Create a single draft addressed to an explicit recipient (match outreach). */
+  async createContactDraft(
+    toEmail: string,
+    subject: string,
+    text: string,
+    leadTitle: string,
+  ): Promise<OutreachDraft> {
+    const contact = await this.leads.createContact({ name: toEmail, email: toEmail });
+    const lead = await this.leads.createLead({ title: leadTitle, contactId: contact.id });
+    const campaign = await this.repo.createCampaign({ name: 'contact' }, this.now());
+    const draft = await this.repo.createDraft(campaign.id, lead.id, toEmail, subject, text, this.now());
+    await this.repo.recordEvent(draft.id, 'created', '', {}, this.now());
+    return draft;
   }
 
   listCampaigns(): Promise<Campaign[]> {
