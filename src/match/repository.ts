@@ -22,6 +22,7 @@ interface BuyerDemandRow {
   currency: string;
   deadline: string | null;
   region: string | null;
+  email: string | null;
   description: string;
   source_signal_id: string | null;
   status: string;
@@ -38,6 +39,7 @@ interface SupplierOfferRow {
   currency: string;
   moq: number | null;
   region: string | null;
+  email: string | null;
   credentials: string | null;
   description: string;
   source_signal_id: string | null;
@@ -78,6 +80,7 @@ export class MatchRepository {
       currency: input.currency ?? 'USD',
       ...(input.deadline !== undefined ? { deadline: input.deadline } : {}),
       ...(input.region !== undefined ? { region: input.region } : {}),
+      ...(input.email !== undefined ? { email: input.email } : {}),
       description: input.description ?? '',
       ...(input.sourceSignalId !== undefined ? { sourceSignalId: input.sourceSignalId } : {}),
       status: 'new',
@@ -86,8 +89,8 @@ export class MatchRepository {
     };
     await this.driver.run(
       `INSERT INTO buyer_demands
-        (id,title,category,quantity,price_min,price_max,currency,deadline,region,description,source_signal_id,status,created_at,updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        (id,title,category,quantity,price_min,price_max,currency,deadline,region,email,description,source_signal_id,status,created_at,updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         demand.id,
         demand.title,
@@ -98,6 +101,7 @@ export class MatchRepository {
         demand.currency,
         demand.deadline ?? null,
         demand.region ?? null,
+        demand.email ?? null,
         demand.description,
         demand.sourceSignalId ?? null,
         demand.status,
@@ -129,6 +133,7 @@ export class MatchRepository {
       currency: row.currency,
       ...(row.deadline ? { deadline: row.deadline } : {}),
       ...(row.region ? { region: row.region } : {}),
+      ...(row.email ? { email: row.email } : {}),
       description: row.description,
       ...(row.source_signal_id ? { sourceSignalId: row.source_signal_id } : {}),
       status: row.status as DemandStatus,
@@ -150,6 +155,7 @@ export class MatchRepository {
       currency: input.currency ?? 'USD',
       ...(input.moq !== undefined ? { moq: input.moq } : {}),
       ...(input.region !== undefined ? { region: input.region } : {}),
+      ...(input.email !== undefined ? { email: input.email } : {}),
       ...(input.credentials !== undefined ? { credentials: input.credentials } : {}),
       description: input.description ?? '',
       ...(input.sourceSignalId !== undefined ? { sourceSignalId: input.sourceSignalId } : {}),
@@ -159,8 +165,8 @@ export class MatchRepository {
     };
     await this.driver.run(
       `INSERT INTO supplier_offers
-        (id,title,category,capacity,price,currency,moq,region,credentials,description,source_signal_id,status,created_at,updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        (id,title,category,capacity,price,currency,moq,region,email,credentials,description,source_signal_id,status,created_at,updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         offer.id,
         offer.title,
@@ -170,6 +176,7 @@ export class MatchRepository {
         offer.currency,
         offer.moq ?? null,
         offer.region ?? null,
+        offer.email ?? null,
         offer.credentials ?? null,
         offer.description,
         offer.sourceSignalId ?? null,
@@ -201,6 +208,7 @@ export class MatchRepository {
       currency: row.currency,
       ...(row.moq !== null ? { moq: Number(row.moq) } : {}),
       ...(row.region ? { region: row.region } : {}),
+      ...(row.email ? { email: row.email } : {}),
       ...(row.credentials ? { credentials: row.credentials } : {}),
       description: row.description,
       ...(row.source_signal_id ? { sourceSignalId: row.source_signal_id } : {}),

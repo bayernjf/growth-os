@@ -15,6 +15,7 @@ export interface BuyerDemand {
   currency: string;
   deadline?: string;
   region?: string;
+  email?: string;
   description: string;
   sourceSignalId?: string;
   status: DemandStatus;
@@ -31,6 +32,7 @@ export interface BuyerDemandInput {
   currency?: string;
   deadline?: string;
   region?: string;
+  email?: string;
   description?: string;
   sourceSignalId?: string;
 }
@@ -44,6 +46,7 @@ export interface SupplierOffer {
   currency: string;
   moq?: number;
   region?: string;
+  email?: string;
   credentials?: string;
   description: string;
   sourceSignalId?: string;
@@ -60,6 +63,7 @@ export interface SupplierOfferInput {
   currency?: string;
   moq?: number;
   region?: string;
+  email?: string;
   credentials?: string;
   description?: string;
   sourceSignalId?: string;

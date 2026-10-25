@@ -89,11 +89,17 @@ export function extractRegion(text: string): string | undefined {
   return undefined;
 }
 
+export function extractEmail(text: string): string | undefined {
+  const m = text.match(/[\w.+-]+@[\w-]+\.[\w.-]+/);
+  return m ? m[0].toLowerCase() : undefined;
+}
+
 export function structureDemand(signal: Signal): BuyerDemandInput {
   const text = `${signal.title} ${signal.content}`;
   const prices = extractPrices(text);
   const quantity = extractQuantity(text);
   const region = extractRegion(text);
+  const email = extractEmail(text);
   return {
     title: signal.title,
     category: extractCategory(text),
@@ -101,6 +107,7 @@ export function structureDemand(signal: Signal): BuyerDemandInput {
     ...(prices.length > 0 ? { priceMin: Math.min(...prices) } : {}),
     ...(prices.length > 1 ? { priceMax: Math.max(...prices) } : {}),
     ...(region ? { region } : {}),
+    ...(email ? { email } : {}),
     description: signal.content,
     sourceSignalId: signal.id,
   };
@@ -111,12 +118,14 @@ export function structureOffer(signal: Signal): SupplierOfferInput {
   const prices = extractPrices(text);
   const region = extractRegion(text);
   const moq = extractMoq(text);
+  const email = extractEmail(text);
   return {
     title: signal.title,
     category: extractCategory(text),
     ...(prices[0] !== undefined ? { price: prices[0] } : {}),
     ...(moq !== undefined ? { moq } : {}),
     ...(region ? { region } : {}),
+    ...(email ? { email } : {}),
     description: signal.content,
     sourceSignalId: signal.id,
   };
