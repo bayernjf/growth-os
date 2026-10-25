@@ -74,4 +74,22 @@ describe('match end-to-end (GATE-G5)', () => {
     expect(listed[0]?.id).toBe(matches[0]?.id);
     expect(listed[0]?.status).toBe('pending');
   });
+
+  it('builds an introduction for a match', async () => {
+    const { driver, service } = await makeStack();
+    await seedTopicAndSignals(driver);
+    await service.ingestSignal(
+      makeSignal('sig_buyer', 'need', 'Looking for stainless steel bottle supplier', 'We want to buy 1000 units, budget $2-$3, ship to USA.'),
+    );
+    await service.ingestSignal(
+      makeSignal('sig_supplier', 'intent', 'Factory supplies stainless steel bottles', 'Wholesale kitchenware from China, price $2.5, MOQ 500.'),
+    );
+    const matches = await service.runMatch();
+    const intro = await service.buildIntroduction(matches[0]!.id);
+    expect(intro.subject).toContain('stainless steel');
+    expect(intro.text).toContain('Buyer demand');
+    expect(intro.text).toContain('Supplier offer');
+    expect(intro.text).toContain('Match score: 90 / 100');
+    expect(intro.text).toContain('category: 40');
+  });
 });
