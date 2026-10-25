@@ -2,7 +2,13 @@
 
 > 状态主入口。开工前先读；每完成一个工作单元立即更新（已完成划掉、待办保留）。
 
-## Current state（2026-10-25，G1 只读调研 + G2 客户挖掘与 CRM 已落码；GATE-G1 已过、GATE-G2 待用户过门）
+## Current state（2026-10-25，G1/G2 已落码且双双过门；G3 设计草案待签核）
+
+- **GATE-G2 已过门**（2026-10-25，owner 复核）：五门全绿（38 用例/6 文件、typecheck/lint/build/迁移配对 0 错，node 22 复核）；真实服务冒烟 **16/16**（15 信号→1 线索[分数与源信号一致、带证据]→状态机合法流转+非法 409→promote 幂等→followup 到期进 watch/due、完成后消失→lead_events 审计 1 条）。
+- **G3 已立项设计（未落码）**：邮件通道已拍板 **SMTP 优先**（厂商中立、全球可用；Gmail/飞书后续适配器）；流程"先设计后签核再落码"。详细设计草案见 bayjf `docs/tier0/growth-os-设计方案.md` v1.1 §13。
+- **跨境合规**：设计方案 v1.1 新增 §14 全球化与跨境合规硬约束（数据最小化、PII 出域控制、CAN-SPAM/CASL/GDPR ePrivacy、suppress list、打开跟踪默认关闭）；G3 落码时强制执行。
+- **定级**：growth-os 已登记 bayjf `docs/PROJECT-TIER-CONVENTION.md` Tier 0。
+- **注意**：本机默认 shell node 20 跑不了测试（`node:sqlite` 需 22.5+），用 `fnm use 22` 后再跑五门。
 
 - **基线**：6 个测试文件 / **38 用例全绿**；`typecheck` 0 错；`lint` 0 错；`tsc -p tsconfig.build.json` 构建出 `dist/`；sqlite + postgres 迁移各 2 份（`001_research`、`002_crm`，配对）。
 - **G1 已落码并实测通过**：
@@ -63,10 +69,11 @@
 ## 待办
 
 - [x] GATE-G1：已过门（24 用例 + 冒烟 4 条验收全绿）。
-- [ ] GATE-G2：用户过门（代码与冒烟已备）。
-- [ ] 待用户拍板：真实搜索源（Tavily/火山 Ark）与 key；T-G2-06 是否接外部 CRM（HubSpot/表格）；G3 邮件通道（Gmail/飞书/SMTP）与签核档。
-- [ ] G3 邮件触达（T-G3-01 ~ 06，引入 zeus-client，默认 D2，估 3–4 天）。
-- [ ] G4 运营化（外部依赖：真实云/域名/密钥/合规）。
+- [x] GATE-G2：已过门（2026-10-25 owner 复核，冒烟 16/16）。
+- [ ] G3 签核：设计方案 v1.1 §13（SMTP 优先 + 签核发送流 + 回执跟踪）待 owner 签核后落码 T-G3-01~06。
+- [ ] 待用户拍板：真实搜索源（Tavily/火山 Ark）与 key；T-G2-06 是否接外部 CRM（HubSpot/表格）。
+- [ ] G3 邮件触达（T-G3-01 ~ 06，引入 zeus-client，默认 D2；强制执行设计方案 §14.2 邮件合规）。
+- [ ] G4 运营化（外部依赖：真实云/域名/密钥/合规；含 SPF/DKIM/DMARC 与跨境数据评估）。
 
 ## 环境/运行
 
