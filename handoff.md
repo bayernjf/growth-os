@@ -99,6 +99,7 @@
 - [x] GATE-G2：已过门（2026-10-25 owner 复核，冒烟 16/16）。
 - [x] G3 签核：已签核（2026-10-25 owner，SMTP 优先 + 签核发送流 + 回执跟踪），落码 T-G3-01~06 进行中。
 - [x] 真实搜索源：已拍板 **Tavily**（2026-10-25）；key 由 owner 填 env（`GROWTH_SEARCH_MODE=online` + `GROWTH_SEARCH_BASE_URL` + `GROWTH_SEARCH_API_KEY`），不入库。现有 online provider 即 Tavily 风格，无需改码。
+- [x] Tavily 真实搜索已接通（2026-10-26）：key 已填本地 `.env`；`serve.ts` 启动时用 `process.loadEnvFile` 加载 `.env`（放在 serve 而非 config，避免污染单测）；真实搜索冒烟 10 信号全绿（provider=online、带真实 URL）。
 - [x] T-G2-06 外部 CRM：跳过（2026-10-25，用 growth-os 自带 CRM，暂不接 HubSpot/表格；G4 运营化再评估）。
 - [x] GATE-G3：已过门（2026-10-25，57 用例 + 真实服务冒烟 7/7 零外发强反证）。
 - [x] G3 邮件触达（T-G3-01~06 全部完成，默认 D2；强制执行设计方案 §14.2 邮件合规）。
@@ -110,7 +111,7 @@
 
 - `npm run check:migrations && npm run typecheck && npm run lint && npm test && npm run build`
 - `npm run migrate:up`（sqlite，默认 `./data/growth-os.db`）；`npm start`（默认 127.0.0.1:8788，offline）。
-- 配置见 `.env.example`；所有密钥仅 env，禁止入 git/文档/业务库。
+- 配置：复制 `.env.example` 为 `.env`（gitignored），`serve.ts` 启动时自动加载 `.env`；所有密钥仅 env，禁止入 git/文档/业务库。
 
 ## 备注
 
