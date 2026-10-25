@@ -14,19 +14,26 @@ import type {
   SupplierOfferInput,
 } from './types.js';
 
+export interface ContactDraftSink {
+  createContactDraft(toEmail: string, subject: string, text: string, leadTitle: string): Promise<{ id: string }>;
+}
+
 export interface MatchServiceDeps {
   repo: MatchRepository;
+  outreach?: ContactDraftSink;
   minScore?: number;
   now?: () => string;
 }
 
 export class MatchService {
   private readonly repo: MatchRepository;
+  private readonly outreach: ContactDraftSink | undefined;
   private readonly minScore: number;
   private readonly now: () => string;
 
   constructor(deps: MatchServiceDeps) {
     this.repo = deps.repo;
+    this.outreach = deps.outreach;
     this.minScore = deps.minScore ?? 60;
     this.now = deps.now ?? (() => new Date().toISOString());
   }
@@ -127,6 +134,20 @@ export class MatchService {
         `  ${reasons}`,
       ].join('\n'),
     };
+  }
+
+  /** Route a match into the outreach flow by creating a contact draft. */
+  async contactMatch(matchId: string, ownerEmail: string): Promise<{ to: string; draft: { id: string } }> {
+    if (!this.outreach) throw Errors.conflict('outreach is not configured for match contact');
+    const match = await this.repo.getMatch(matchId);
+    if (!match) throw Errors.notFound(`match ${matchId}`);
+    const demand = await this.repo.getBuyerDemand(match.buyerDemandId);
+    const offer = await this.repo.getSupplierOffer(match.supplierOfferId);
+    if (!demand || !offer) throw Errors.notFound(`match ${matchId} entity missing`);
+    const to = demand.email ?? offer.email ?? ownerEmail;
+    const { subject, text } = await this.buildIntroduction(matchId);
+    const draft = await this.outreach.createContactDraft(to, subject, text, subject);
+    return { to, draft };
   }
 
   private async setMatchStatus(id: string, status: 'accepted' | 'rejected'): Promise<Match> {

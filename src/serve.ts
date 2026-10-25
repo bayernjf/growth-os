@@ -65,7 +65,7 @@ async function main(): Promise<void> {
   });
 
   const matchRepo = new MatchRepository(driver);
-  const matchService = new MatchService({ repo: matchRepo });
+  const matchService = new MatchService({ repo: matchRepo, outreach: outreachService });
 
   const app = new Hono();
   app.route('/', createResearchApp({ service: researchService, apiToken: config.apiToken }));

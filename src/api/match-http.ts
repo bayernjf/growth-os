@@ -78,6 +78,12 @@ export function createMatchApp(deps: MatchAppDeps): Hono {
     c.json(await deps.service.buildIntroduction(c.req.param('id'))),
   );
 
+  app.post('/api/v1/match/matches/:id/contact', async (c) => {
+    const body = (await c.req.json()) as Record<string, unknown>;
+    const ownerEmail = String(body.ownerEmail ?? '');
+    return c.json(await deps.service.contactMatch(c.req.param('id'), ownerEmail));
+  });
+
   app.post('/api/v1/match/matches/:id/accept', async (c) =>
     c.json(await deps.service.acceptMatch(c.req.param('id'))),
   );
