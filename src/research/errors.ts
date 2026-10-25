@@ -7,6 +7,7 @@ export type GrowthErrorCode =
   | 'CREDENTIAL_MISSING'
   | 'SEARCH_UNAVAILABLE'
   | 'DECISION_UNAVAILABLE'
+  | 'MAIL_UNAVAILABLE'
   | 'INVALID_TRANSITION';
 
 export class GrowthError extends Error {
@@ -52,4 +53,6 @@ export const Errors = {
     new GrowthError('SEARCH_UNAVAILABLE', message, 503, true),
   decisionUnavailable: (message: string) =>
     new GrowthError('DECISION_UNAVAILABLE', message, 503, true),
+  mailUnavailable: (message: string) =>
+    new GrowthError('MAIL_UNAVAILABLE', message, 503, true),
 };

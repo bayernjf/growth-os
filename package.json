@@ -22,10 +22,12 @@
   "dependencies": {
     "@hono/node-server": "^1.13.0",
     "hono": "^4.13.13",
+    "nodemailer": "^6.9.16",
     "zeus-client": "file:../zeus/packages/zeus-client"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
+    "@types/nodemailer": "^8.0.2",
     "eslint": "^9.0.0",
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.0.0",

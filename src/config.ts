@@ -21,6 +21,12 @@ export interface AppConfig {
   zeusMode: 'off' | 'online';
   zeusUrl?: string | undefined;
   zeusToken?: string | undefined;
+  mailMode: 'off' | 'smtp';
+  mailHost?: string | undefined;
+  mailPort: number;
+  mailUser?: string | undefined;
+  mailPass?: string | undefined;
+  mailFrom?: string | undefined;
   leadMinScore: number;
   scoring: ScoringConfig;
 }
@@ -36,6 +42,7 @@ export function loadConfig(): AppConfig {
   const dbDriver = process.env.GROWTH_DB_DRIVER === 'postgres' ? 'postgres' : 'sqlite';
   const searchMode = process.env.GROWTH_SEARCH_MODE === 'online' ? 'online' : 'offline';
   const zeusMode = process.env.GROWTH_ZEUS_MODE === 'online' ? 'online' : 'off';
+  const mailMode = process.env.GROWTH_MAIL_MODE === 'smtp' ? 'smtp' : 'off';
   return {
     host: process.env.GROWTH_HOST ?? '127.0.0.1',
     port: num('GROWTH_PORT', 8788),
@@ -48,6 +55,12 @@ export function loadConfig(): AppConfig {
     zeusMode,
     zeusUrl: process.env.GROWTH_ZEUS_URL || undefined,
     zeusToken: process.env.GROWTH_ZEUS_TOKEN || undefined,
+    mailMode,
+    mailHost: process.env.GROWTH_MAIL_HOST || undefined,
+    mailPort: num('GROWTH_MAIL_PORT', 587),
+    mailUser: process.env.GROWTH_MAIL_USER || undefined,
+    mailPass: process.env.GROWTH_MAIL_PASS || undefined,
+    mailFrom: process.env.GROWTH_MAIL_FROM || undefined,
     leadMinScore: num('LEAD_MIN_SCORE', 60),
     scoring: {
       weights: { type: 0.45, source: 0.2, fresh: 0.15, keyword: 0.2 },
