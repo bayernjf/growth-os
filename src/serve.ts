@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
@@ -39,6 +39,11 @@ async function createDriver(): Promise<StorageDriver> {
 }
 
 async function main(): Promise<void> {
+  // Load a local .env if present so GROWTH_* settings can live in a file.
+  // Kept out of config.ts so unit tests import config without env side effects.
+  if (existsSync('.env')) {
+    process.loadEnvFile('.env');
+  }
   const config = loadConfig();
   const driver = await createDriver();
   await migrateUp(driver);
