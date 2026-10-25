@@ -4,7 +4,7 @@
 
 ## Current state（2026-10-25，G1 只读调研闭环完成，GATE-G1 待用户过门）
 
-- **基线**：3 个测试文件 / **19 用例全绿**；`typecheck` 0 错；`lint` 0 错；`tsc -p tsconfig.build.json` 构建出 `dist/`；sqlite + postgres 迁移各 1 份（`001_research`，配对）。
+- **基线**：4 个测试文件 / **24 用例全绿**；`typecheck` 0 错；`lint` 0 错；`tsc -p tsconfig.build.json` 构建出 `dist/`；sqlite + postgres 迁移各 1 份（`001_research`，配对）。
 - **G1 已落码并实测通过**：
   - 只读搜索连接器 `research/provider/`：`OfflineSearchProvider`（确定性回放 `recordings/search/fixtures.json`，默认）、`OnlineSearchProvider`（Tavily 风格 REST，GET 只读）、`registry`（online 缺凭据 → 拒绝型 provider，run 返回 422，**不静默回退离线**）。
   - 信号引擎：`collector.ts`（规范化 + 指纹去重，指纹 = sha256(规范化 URL) 截 16）、`scoring.ts`（0–100 确定性打分，类型/来源/新鲜度/关键词四项加权，分项可解释，新鲜度半衰期 30 天、无日期取中性 0.5）。
@@ -13,8 +13,8 @@
   - 持久化：`research/repository.ts`（StorageDriver 双方言，JSON 仅在边界序列化；signals `(topic_id,fingerprint)` 唯一、reports `(topic_id,version)` 唯一）。
   - 编排 + HTTP：`research-service.ts`、`api/research-http.ts`（Hono，7 个路由 + `/healthz`，可选 Bearer token，GrowthError 统一错误体）。
   - 迁移：`scripts/migrate.mjs`（env `GROWTH_*`）、`scripts/check-migrations.sh`（配对校验，实测 OK）。
-- **真实启动实测（本机 node 22）**：
-  - 离线：建 topic → run，`topic.status=done`，得 8 条信号 / 5 条 pending_review 洞察 / 报告 v1、avg 67、top1=75(intent)、水印 true；二次 run 信号仍 8（去重稳定）、报告 v2；confirm 洞察后再 review 返 409，已确认洞察重跑后保持 confirmed。
+- **真实启动实测（本机 node 24，冒烟脚本重跑）**：
+  - 离线：建 topic → run，`topic.status=done`，得 15 条信号（16 条 fixtures 去重 1）/ 7 条 pending_review 洞察 / 报告 v1、avg 61、top1=77(intent)、水印 true；二次 run 信号仍 15（去重稳定）、报告 v2；confirm 洞察后再 review 返 409，已确认洞察重跑后保持 confirmed。
   - online 无凭据：建 topic 正常，run 返 `422 CREDENTIAL_MISSING`（不静默离线）。
   - 迁移 CLI：`migrate:up` 应用 001_research，二次运行幂等；5 张表（含 schema_migrations）建出。
 - **G1 无外发**：不依赖 zeus-client、无任何发信/登录/写第三方代码；外发在 G3 引入并经 zeus 分级。
@@ -32,7 +32,7 @@
 - T-G1-09 编排 + HTTP API + serve 装配
 - T-G1-10 端到端契约 + GATE-G1（离线全链路 / online 422 反证 / 五门）
 
-## 测试覆盖（tests/）
+## 测试覆盖（tests/，4 文件 / 24 用例）
 
 - `scoring.test.ts`（5）：高分上限、低词命中、无日期中性、衰减、区间与分项一致性。
 - `provider.test.ts`（7）：离线确定性与过滤、online 缺 key 422、结果映射分类、不可达/非 2xx → 503。
