@@ -5,7 +5,8 @@ export type GrowthErrorCode =
   | 'NOT_FOUND'
   | 'CONFLICT'
   | 'CREDENTIAL_MISSING'
-  | 'SEARCH_UNAVAILABLE';
+  | 'SEARCH_UNAVAILABLE'
+  | 'INVALID_TRANSITION';
 
 export class GrowthError extends Error {
   readonly code: GrowthErrorCode;
@@ -43,6 +44,7 @@ export const Errors = {
     new GrowthError('VALIDATION_FAILED', message, 400, false, details),
   notFound: (what: string) => new GrowthError('NOT_FOUND', `${what} not found`, 404),
   conflict: (message: string) => new GrowthError('CONFLICT', message, 409),
+  invalidTransition: (message: string) => new GrowthError('INVALID_TRANSITION', message, 409),
   credentialMissing: (message: string) =>
     new GrowthError('CREDENTIAL_MISSING', message, 422),
   searchUnavailable: (message: string) =>
