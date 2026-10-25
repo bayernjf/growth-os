@@ -1,8 +1,13 @@
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
 import { loadConfig } from './config.js';
 import { createResearchApp } from './api/research-http.js';
+import { createCrmApp } from './api/crm-http.js';
+import { CrmRepository } from './crm/repository.js';
+import { LeadService } from './crm/lead-service.js';
+import { LocalWatch } from './crm/watch.js';
 import { PostgresDriver } from './storage/postgres/postgres-driver.js';
 import { migrateUp } from './storage/migrate.js';
 import type { StorageDriver } from './storage/driver.js';
@@ -31,8 +36,19 @@ async function main(): Promise<void> {
 
   const repo = new ResearchRepository(driver);
   const provider = createSearchProvider(config);
-  const service = new ResearchService({ repo, provider, scoring: config.scoring });
-  const app = createResearchApp({ service, apiToken: config.apiToken });
+  const researchService = new ResearchService({ repo, provider, scoring: config.scoring });
+
+  const crmRepo = new CrmRepository(driver);
+  const crmService = new LeadService({
+    repo: crmRepo,
+    signals: repo,
+    watch: new LocalWatch(crmRepo),
+    leadMinScore: config.leadMinScore,
+  });
+
+  const app = new Hono();
+  app.route('/', createResearchApp({ service: researchService, apiToken: config.apiToken }));
+  app.route('/', createCrmApp({ service: crmService, apiToken: config.apiToken }));
 
   serve({ fetch: app.fetch, hostname: config.host, port: config.port }, () => {
     console.log(

@@ -18,6 +18,7 @@ export interface AppConfig {
   searchMode: 'offline' | 'online';
   searchBaseUrl?: string | undefined;
   searchApiKey?: string | undefined;
+  leadMinScore: number;
   scoring: ScoringConfig;
 }
 
@@ -40,6 +41,7 @@ export function loadConfig(): AppConfig {
     searchMode,
     searchBaseUrl: process.env.GROWTH_SEARCH_BASE_URL || undefined,
     searchApiKey: process.env.GROWTH_SEARCH_API_KEY || undefined,
+    leadMinScore: num('LEAD_MIN_SCORE', 60),
     scoring: {
       weights: { type: 0.45, source: 0.2, fresh: 0.15, keyword: 0.2 },
       typeScore: {
