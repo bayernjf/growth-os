@@ -1,0 +1,150 @@
+{
+  "recordedAt": "2026-10-25T00:00:00Z",
+  "note": "Deterministic offline fixtures for growth-os G1. These are synthetic/recorded examples, NOT real market data.",
+  "mentions": [
+    {
+      "sourceType": "social",
+      "signalType": "need",
+      "title": "Looking for an AI CRM that handles lead generation for a small agency",
+      "content": "We are a 5-person B2B agency and need an AI CRM that can do lead generation and prioritise the accounts most likely to buy. Manual spreadsheets don't scale.",
+      "url": "https://example.reddit.com/r/sales/need-ai-crm-lead-gen",
+      "author": "u/agency_founder",
+      "publishedAt": "2026-10-20T09:12:00Z"
+    },
+    {
+      "sourceType": "social",
+      "signalType": "need",
+      "title": "How can I automate cold email follow up without sounding like spam?",
+      "content": "Need a personal agent that drafts cold email follow up sequences from intent signals and waits for my approval before sending. Is anything doing this?",
+      "url": "https://example.reddit.com/r/marketing/need-cold-email-follow-up",
+      "author": "u/growth_lead",
+      "publishedAt": "2026-10-21T14:30:00Z"
+    },
+    {
+      "sourceType": "social",
+      "signalType": "pain",
+      "title": "Our sales reps waste hours every day on manual CRM data entry",
+      "content": "The biggest pain is CRM data entry and logging sales activities. Reps hate it, data is stale, and lead generation suffers because nobody follows up.",
+      "url": "https://news.ycombinator.com/item?id=pain-crm-data-entry",
+      "author": "hackernews-user",
+      "publishedAt": "2026-10-19T08:00:00Z"
+    },
+    {
+      "sourceType": "support",
+      "signalType": "pain",
+      "title": "Support: personal agent keeps dropping follow-up tasks after restart",
+      "content": "Our personal agent loses scheduled follow up tasks after the app restarts. This is broken for sales outreach and causes missed leads.",
+      "url": "https://support.example.com/tickets/personal-agent-follow-up",
+      "author": "customer-427",
+      "publishedAt": "2026-10-18T11:45:00Z"
+    },
+    {
+      "sourceType": "review",
+      "signalType": "comparison",
+      "title": "AiSDR vs 11x vs Clay: best alternative for outreach at SMB scale",
+      "content": "Compared AiSDR, 11x and Clay for outreach. Looking for an alternative that does research + draft + human approval rather than full autopilot. Pricing is also a factor.",
+      "url": "https://reviews.example.com/aisdr-vs-11x-vs-clay",
+      "author": "g2-reviewer",
+      "publishedAt": "2026-10-22T16:20:00Z"
+    },
+    {
+      "sourceType": "social",
+      "signalType": "comparison",
+      "title": "Looking for a cheaper alternative to HubSpot Breeze for a small sales team",
+      "content": "HubSpot Breeze is too expensive for us. Anyone compared it to a lighter AI CRM for lead generation and follow up? Need the comparison honestly.",
+      "url": "https://example.reddit.com/r/crm/alternative-hubspot-breeze",
+      "author": "u/smb_ops",
+      "publishedAt": "2026-10-23T10:05:00Z"
+    },
+    {
+      "sourceType": "web",
+      "signalType": "competitor",
+      "title": "Clay launches browsing agents for custom research on 150+ data sources",
+      "content": "Clay announced agentic browsing that researches prospects across its data waterfall, expanding its lead generation and enrichment product.",
+      "url": "https://news.example.com/clay-launches-browsing-agents",
+      "author": "tech-press",
+      "publishedAt": "2026-10-17T12:00:00Z"
+    },
+    {
+      "sourceType": "official",
+      "signalType": "competitor",
+      "title": "11x.ai announces the next Alice outbound agent with autonomous research",
+      "content": "11x.ai announced a new Alice outbound agent that researches accounts and writes personalized outreach, positioning it as a digital worker for sales.",
+      "url": "https://www.11x.ai/blog/alice-outbound-update",
+      "author": "11x",
+      "publishedAt": "2026-10-16T09:00:00Z"
+    },
+    {
+      "sourceType": "web",
+      "signalType": "trend",
+      "title": "Why personal agents are becoming the next GTM category",
+      "content": "Analysts argue personal agents that research markets, find customers and run outreach will reshape go-to-market, but most stay human-in-the-loop.",
+      "url": "https://blog.example.com/personal-agents-gtm",
+      "author": "industry-analyst",
+      "publishedAt": "2026-10-24T07:30:00Z"
+    },
+    {
+      "sourceType": "social",
+      "signalType": "intent",
+      "title": "Need a demo and pricing for an AI sales agent before end of quarter",
+      "content": "We have budget this quarter and want to buy an AI sales agent for outreach and lead generation. Who can give a demo and pricing quickly?",
+      "url": "https://example.reddit.com/r/sales/intent-buy-ai-sales-agent",
+      "author": "u/ready_to_buy",
+      "publishedAt": "2026-10-24T18:00:00Z"
+    },
+    {
+      "sourceType": "web",
+      "signalType": "hiring",
+      "title": "Agentic CRM startup is hiring account executives to scale sales",
+      "content": "A well-funded agentic CRM company is hiring multiple AEs to scale outbound sales and partner onboarding across the US market.",
+      "url": "https://jobs.example.com/agentic-crm-hiring-ae",
+      "author": "jobs-board",
+      "publishedAt": "2026-10-15T13:00:00Z"
+    },
+    {
+      "sourceType": "web",
+      "signalType": "funding",
+      "title": "AI SDR startup raises Series A funding to expand outreach automation",
+      "content": "An AI SDR company raised Series A funding to build autonomous prospecting and outreach agents, citing strong demand from B2B sales teams.",
+      "url": "https://news.example.com/ai-sdr-series-a-funding",
+      "author": "vc-desk",
+      "publishedAt": "2026-10-14T09:30:00Z"
+    },
+    {
+      "sourceType": "social",
+      "signalType": "tech_stack",
+      "title": "We built our outreach stack using n8n, Supabase and a lightweight AI CRM",
+      "content": "Sharing our stack: n8n for workflows, Supabase for data, and a small AI CRM. Keeps lead generation and follow up under our control.",
+      "url": "https://example.reddit.com/r/SaaS/tech-stack-outreach",
+      "author": "u/indie_hacker",
+      "publishedAt": "2026-10-13T20:15:00Z"
+    },
+    {
+      "sourceType": "social",
+      "signalType": "need",
+      "title": "Need a personal agent that monitors niche communities for buying signals",
+      "content": "Want a personal agent to watch forums and surface real demand and pain points before we build, so we stop guessing what the market wants.",
+      "url": "https://example.reddit.com/r/startups/need-personal-agent-signals",
+      "author": "u/pre_founder",
+      "publishedAt": "2026-10-22T08:40:00Z"
+    },
+    {
+      "sourceType": "web",
+      "signalType": "trend",
+      "title": "Old roundup: marketing automation trends from early 2025",
+      "content": "A dated article about generic marketing automation trends and dashboards, with little specific relevance to personal agents.",
+      "url": "https://blog.example.com/old-marketing-trends-2025",
+      "author": "archive",
+      "publishedAt": "2025-01-10T00:00:00Z"
+    },
+    {
+      "sourceType": "social",
+      "signalType": "need",
+      "title": "Duplicate: looking for an AI CRM for lead generation at an agency",
+      "content": "We need an AI CRM that handles lead generation for a small agency, same problem posted here already.",
+      "url": "https://example.reddit.com/r/sales/need-ai-crm-lead-gen",
+      "author": "u/agency_founder",
+      "publishedAt": "2026-10-20T09:12:00Z"
+    }
+  ]
+}

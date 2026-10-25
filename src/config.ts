@@ -1,0 +1,68 @@
+// growth-os configuration: env parsing with safe defaults.
+
+export interface ScoringConfig {
+  weights: { type: number; source: number; fresh: number; keyword: number };
+  typeScore: Record<string, number>;
+  credibility: Record<string, number>;
+  halfLifeDays: number;
+  insightMinScore: number;
+  reportTopN: number;
+}
+
+export interface AppConfig {
+  host: string;
+  port: number;
+  apiToken?: string | undefined;
+  dbDriver: 'sqlite' | 'postgres';
+  sqlitePath: string;
+  searchMode: 'offline' | 'online';
+  searchBaseUrl?: string | undefined;
+  searchApiKey?: string | undefined;
+  scoring: ScoringConfig;
+}
+
+function num(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+export function loadConfig(): AppConfig {
+  const dbDriver = process.env.GROWTH_DB_DRIVER === 'postgres' ? 'postgres' : 'sqlite';
+  const searchMode = process.env.GROWTH_SEARCH_MODE === 'online' ? 'online' : 'offline';
+  return {
+    host: process.env.GROWTH_HOST ?? '127.0.0.1',
+    port: num('GROWTH_PORT', 8788),
+    apiToken: process.env.GROWTH_API_TOKEN || undefined,
+    dbDriver,
+    sqlitePath: process.env.GROWTH_SQLITE_PATH ?? './data/growth-os.db',
+    searchMode,
+    searchBaseUrl: process.env.GROWTH_SEARCH_BASE_URL || undefined,
+    searchApiKey: process.env.GROWTH_SEARCH_API_KEY || undefined,
+    scoring: {
+      weights: { type: 0.45, source: 0.2, fresh: 0.15, keyword: 0.2 },
+      typeScore: {
+        intent: 1.0,
+        need: 1.0,
+        pain: 0.85,
+        comparison: 0.7,
+        competitor: 0.6,
+        hiring: 0.55,
+        funding: 0.55,
+        tech_stack: 0.55,
+        trend: 0.4,
+      },
+      credibility: {
+        official: 0.9,
+        support: 0.7,
+        review: 0.6,
+        web: 0.5,
+        social: 0.45,
+      },
+      halfLifeDays: num('SCORE_FRESH_HALFLIFE_DAYS', 30),
+      insightMinScore: num('INSIGHT_MIN_SCORE', 60),
+      reportTopN: num('REPORT_TOP_N', 10),
+    },
+  };
+}
