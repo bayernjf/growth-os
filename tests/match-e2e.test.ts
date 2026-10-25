@@ -93,3 +93,51 @@ describe('match end-to-end (GATE-G5)', () => {
     expect(intro.text).toContain('category: 40');
   });
 });
+
+function makeSink() {
+  const created: Array<{ toEmail: string; subject: string; text: string; leadTitle: string }> = [];
+  return {
+    created,
+    createContactDraft(toEmail: string, subject: string, text: string, leadTitle: string) {
+      created.push({ toEmail, subject, text, leadTitle });
+      return Promise.resolve({ id: 'draft_1' });
+    },
+  };
+}
+
+describe('match contact (routing into outreach)', () => {
+  it('routes a match into the outreach flow using buyer email', async () => {
+    const { driver, repo } = await makeStack();
+    const sink = makeSink();
+    const service = new MatchService({ repo, outreach: sink, now: () => FIXED_NOW });
+    await seedTopicAndSignals(driver);
+    await service.ingestSignal(
+      makeSignal('sig_buyer', 'need', 'Looking for stainless steel bottle supplier', 'We want to buy 1000 units, budget $2-$3. Contact: buyer@acme.com'),
+    );
+    await service.ingestSignal(
+      makeSignal('sig_supplier', 'intent', 'Factory supplies stainless steel bottles', 'Wholesale kitchenware from China, price $2.5, MOQ 500.'),
+    );
+    const matches = await service.runMatch();
+    const result = await service.contactMatch(matches[0]!.id, 'owner@me.com');
+    expect(result.to).toBe('buyer@acme.com');
+    expect(sink.created).toHaveLength(1);
+    expect(sink.created[0]?.toEmail).toBe('buyer@acme.com');
+    expect(sink.created[0]?.subject).toContain('stainless steel');
+  });
+
+  it('falls back to owner email when no contact email exists', async () => {
+    const { driver, repo } = await makeStack();
+    const sink = makeSink();
+    const service = new MatchService({ repo, outreach: sink, now: () => FIXED_NOW });
+    await seedTopicAndSignals(driver);
+    await service.ingestSignal(
+      makeSignal('sig_buyer', 'need', 'Looking for stainless steel bottle supplier', 'We want to buy 1000 units, budget $2-$3.'),
+    );
+    await service.ingestSignal(
+      makeSignal('sig_supplier', 'intent', 'Factory supplies stainless steel bottles', 'Wholesale kitchenware from China, price $2.5, MOQ 500.'),
+    );
+    const matches = await service.runMatch();
+    const result = await service.contactMatch(matches[0]!.id, 'owner@me.com');
+    expect(result.to).toBe('owner@me.com');
+  });
+});
