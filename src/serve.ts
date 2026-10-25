@@ -15,6 +15,12 @@ import { SqliteDriver } from './storage/sqlite/sqlite-driver.js';
 import { createSearchProvider } from './research/provider/registry.js';
 import { ResearchRepository } from './research/repository.js';
 import { ResearchService } from './research/research-service.js';
+import { createOutreachApp } from './api/outreach-http.js';
+import { createDecisionPort } from './decision/registry.js';
+import { createMailPort } from './mail/registry.js';
+import { TemplateDraftWriter } from './outreach/content.js';
+import { OutreachRepository } from './outreach/repository.js';
+import { OutreachService } from './outreach/outreach-service.js';
 
 async function createDriver(): Promise<StorageDriver> {
   const config = loadConfig();
@@ -46,9 +52,19 @@ async function main(): Promise<void> {
     leadMinScore: config.leadMinScore,
   });
 
+  const outreachRepo = new OutreachRepository(driver);
+  const outreachService = new OutreachService({
+    repo: outreachRepo,
+    leads: crmRepo,
+    writer: new TemplateDraftWriter(),
+    decision: createDecisionPort(config),
+    mail: createMailPort(config),
+  });
+
   const app = new Hono();
   app.route('/', createResearchApp({ service: researchService, apiToken: config.apiToken }));
   app.route('/', createCrmApp({ service: crmService, apiToken: config.apiToken }));
+  app.route('/', createOutreachApp({ service: outreachService, apiToken: config.apiToken }));
 
   serve({ fetch: app.fetch, hostname: config.host, port: config.port }, () => {
     console.log(
