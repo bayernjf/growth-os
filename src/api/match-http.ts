@@ -43,6 +43,7 @@ export function createMatchApp(deps: MatchAppDeps): Hono {
       ...(body.currency !== undefined ? { currency: String(body.currency) } : {}),
       ...(body.deadline !== undefined ? { deadline: String(body.deadline) } : {}),
       ...(body.region !== undefined ? { region: String(body.region) } : {}),
+      ...(body.email !== undefined ? { email: String(body.email) } : {}),
       ...(body.description !== undefined ? { description: String(body.description) } : {}),
     });
     return c.json(demand, 201);
@@ -61,6 +62,7 @@ export function createMatchApp(deps: MatchAppDeps): Hono {
       ...(body.currency !== undefined ? { currency: String(body.currency) } : {}),
       ...(body.moq !== undefined ? { moq: Number(body.moq) } : {}),
       ...(body.region !== undefined ? { region: String(body.region) } : {}),
+      ...(body.email !== undefined ? { email: String(body.email) } : {}),
       ...(body.credentials !== undefined ? { credentials: String(body.credentials) } : {}),
       ...(body.description !== undefined ? { description: String(body.description) } : {}),
     });
