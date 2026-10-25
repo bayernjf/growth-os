@@ -71,7 +71,8 @@
 - [x] GATE-G1：已过门（24 用例 + 冒烟 4 条验收全绿）。
 - [x] GATE-G2：已过门（2026-10-25 owner 复核，冒烟 16/16）。
 - [x] G3 签核：已签核（2026-10-25 owner，SMTP 优先 + 签核发送流 + 回执跟踪），落码 T-G3-01~06 进行中。
-- [ ] 待用户拍板：真实搜索源（Tavily/火山 Ark）与 key；T-G2-06 是否接外部 CRM（HubSpot/表格）。
+- [x] 真实搜索源：已拍板 **Tavily**（2026-10-25）；key 由 owner 填 env（`GROWTH_SEARCH_MODE=online` + `GROWTH_SEARCH_BASE_URL` + `GROWTH_SEARCH_API_KEY`），不入库。现有 online provider 即 Tavily 风格，无需改码。
+- [x] T-G2-06 外部 CRM：跳过（2026-10-25，用 growth-os 自带 CRM，暂不接 HubSpot/表格；G4 运营化再评估）。
 - [ ] G3 邮件触达（T-G3-01 ~ 06，引入 zeus-client，默认 D2；强制执行设计方案 §14.2 邮件合规）。
 - [ ] G4 运营化（外部依赖：真实云/域名/密钥/合规；含 SPF/DKIM/DMARC 与跨境数据评估）。
 
