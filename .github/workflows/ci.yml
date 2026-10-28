@@ -19,6 +19,14 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
 
+      - name: "Clone and build sibling zeus (file: dependency zeus-client)"
+        run: |
+          ZEUS_DIR="$GITHUB_WORKSPACE/../zeus"
+          git clone --depth 1 https://github.com/${{ github.repository_owner }}/zeus.git "$ZEUS_DIR"
+          cd "$ZEUS_DIR"
+          npm ci
+          npm run build
+
       - name: Install dependencies
         run: npm install
       - name: Build (for migration CLI)
