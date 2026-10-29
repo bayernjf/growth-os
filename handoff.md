@@ -110,8 +110,11 @@
   - 只读核对 zeus（未改 zeus 仓）：watch 触发面已 boot 装配——`POST/GET/DELETE /api/watches`、`POST /api/watch-tick`（bearer、caller 驱动节拍，内核不持定时器；zeus `src/http/server.ts` ~L2644-2770、`src/state/boot.ts` 装配 WatchRegistry + runWatchTick）；watch 读数源仅三：`metrics`（zeus 内核自指标）、`realm`（仅 entryCount / lastItemModifiedAt 两个元数据）、`connector`（须握手注册的声明工具，出站走 zeus 守卫）。`packages/zeus-client` 只导出 Decision API v1，无 watch/realm/intent 面。
   - 结论：growth-os 的 CRM followup 对 zeus tick 完全不可见，单仓离线无法闭合「由 zeus tick 驱动到期提醒」：(a) growth-os 不是 zeus connector（缺声明/握手接入，跨仓）；(b) realm 读数无逐条 due 语义，即便能 push 条目也表达不了「followup F 到期」；(c) 唯一能写提醒的 `POST /api/intents` 是 skill dispatch 门（tier-1 对未注册 skill 拒 403 skill_unavailable），不是人审提醒登记口，growth-os 在 zeus 无注册 skill。
   - 落码前置（bayjf tier0 设计稿拍板二选一）：
-    1. **zeus 新增 bearer reminders 登记面**（便宜：growth-os 在本地 tick 接缝把到期 followup 上报，zeus oversight/escalation 接住；无需握手）；或
-    2. **growth-os 以 connector 接入**（watch-native 长路径：growth-os 暴露 `crm.listDueFollowups` 只读工具 → zeus connector 声明/握手 → 注册 `source=connector` watch + budget + plan intent；需跨仓 onboarding 设计）。
+    ✅ **已拍板（2026-10-29，owner）：选项 2——growth-os 以 connector 接入**
+    （watch-native 长路径：growth-os 暴露 `crm.listDueFollowups` 只读工具 →
+    zeus connector 声明/握手 → 注册 `source=connector` watch + budget +
+    plan intent；需跨仓 onboarding 设计）。选项 1「zeus 新增 bearer reminders
+    登记面」已否决。
   - 闭合后 growth-os 侧预定落码形状（勿提前写）：ZeusWatchAdapter 包 LocalWatch（本地到期判定为唯一事实源）+ `GROWTH_ZEUS_MODE=off` 默认 fail-closed + 007 幂等表 `watch_reminders(followup_id unique, external_id, raised_at, resolved_at)`（sqlite+postgres 双方言，防重复 tick 重复上报）+ 注入 fetch 的裸 bearer client（离线 fake zeus 测试）。
   - DelegationContract 非阻塞：plan 模式人审提醒本就不需要契约；execute 无人值守提醒的 `delegationId` 登记面 zeus 已就绪（`POST /api/watches` 接受 delegationId，execute fire 派生一次性子票）。
 
