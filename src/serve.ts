@@ -24,6 +24,7 @@ import { OutreachService } from './outreach/outreach-service.js';
 import { createMatchApp } from './api/match-http.js';
 import { MatchRepository } from './match/repository.js';
 import { MatchService } from './match/match-service.js';
+import { createMcpApp } from './api/mcp-http.js';
 
 async function createDriver(): Promise<StorageDriver> {
   const config = loadConfig();
@@ -77,6 +78,7 @@ async function main(): Promise<void> {
   app.route('/', createCrmApp({ service: crmService, apiToken: config.apiToken }));
   app.route('/', createOutreachApp({ service: outreachService, apiToken: config.apiToken }));
   app.route('/', createMatchApp({ service: matchService, apiToken: config.apiToken }));
+  app.route('/', createMcpApp({ service: crmService, mcpToken: config.mcpToken }));
 
   serve({ fetch: app.fetch, hostname: config.host, port: config.port }, () => {
     console.log(

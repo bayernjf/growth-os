@@ -28,6 +28,7 @@ export interface AppConfig {
   mailPass?: string | undefined;
   mailFrom?: string | undefined;
   leadMinScore: number;
+  mcpToken?: string | undefined;
   scoring: ScoringConfig;
 }
 
@@ -62,6 +63,7 @@ export function loadConfig(): AppConfig {
     mailPass: process.env.GROWTH_MAIL_PASS || undefined,
     mailFrom: process.env.GROWTH_MAIL_FROM || undefined,
     leadMinScore: num('LEAD_MIN_SCORE', 60),
+    mcpToken: process.env.GROWTH_MCP_TOKEN || undefined,
     scoring: {
       weights: { type: 0.45, source: 0.2, fresh: 0.15, keyword: 0.2 },
       typeScore: {
