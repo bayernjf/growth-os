@@ -2,8 +2,16 @@
 
 > 状态主入口。开工前先读；每完成一个工作单元立即更新（已完成划掉、待办保留）。
 
-## Current state（2026-10-25，G1/G2/G3/G5 已落码且过门；G4 运营化待排）
+## Current state（2026-10-30，Tier0 评审修复批次已落码并过门；G4 运营化待排）
 
+- **Tier0 评审修复批次（2026-10-30）已落码并过门**（评审报告：bayjf `docs/tier0/Tier0-代码评审报告-2026-10-30.md`）：
+  - **H1 fail-closed 启动门**：`GROWTH_API_TOKEN` 缺失/为空即拒绝启动（exit 1 + 明确错误，`src/util/boot.ts` 纯函数可单测）；启动日志新增一行授权姿态 `auth posture: mode=researchBearer=callbackSecret=search=zeus=mail=`。
+  - **P1 常量时间 token 比较**：`secureEqual`（双侧先 sha256 定长再 `timingSafeEqual`）替换 research/crm/outreach/match 的 Bearer 比较与 MCP token 比较，消除时序泄漏与长度泄漏。
+  - **P1 回调签名 + 幂等**：`GROWTH_OUTREACH_CALLBACK_SECRET`（config + `.env.example`）；`POST /api/v1/outreach/receipts/{bounce,reply}` 必须带 `X-Growth-Signature: v1=<hex HMAC-SHA256(secret, 原始请求体字节)>`（先读 raw body 再 parse；secret 未配置 fail-closed 401；验签常量时间）；载荷必须带 `eventId`，经 `outreach_callback_events` 表（`007_callback_events` 双方言迁移）insert-first-wins 幂等，同 id 重放返回首次结果且不重复改抑制名单/CRM。
+  - **H3 typecheck 修红**：`tests/mcp-http.test.ts` fixture 用显式结构类型（提交 897ded5，无 any/@ts-ignore）。
+  - 验证门五项全绿（18 文件 / 104 用例）；无 token 拒启与姿态日志已真实启动冒烟复核。
+  - 本批未做（P2 挂账见「待办」）：500 回显驱动错误文本、lead 状态+审计同事务（H4）。
+  - **边界**：T-G2-05 预定落码形状（zeus watch connector / `watch_reminders` 表）按拍板**未提前实现**。
 - **GATE-G2 已过门**（2026-10-25，owner 复核）：五门全绿（38 用例/6 文件、typecheck/lint/build/迁移配对 0 错，node 22 复核）；真实服务冒烟 **16/16**（15 信号→1 线索[分数与源信号一致、带证据]→状态机合法流转+非法 409→promote 幂等→followup 到期进 watch/due、完成后消失→lead_events 审计 1 条）。
 - **G3 已签核（2026-10-25 owner），已落码并过门**：邮件通道 **SMTP 优先**（厂商中立、全球可用；Gmail/飞书后续适配器）。详细设计见 bayjf `docs/tier0/growth-os-设计方案.md` v1.2 §13。T-G3-01（zeus-client DecisionPort）、T-G3-02（MailPort + SMTP 适配器）、T-G3-03/04（campaign 草稿 + zeus 签核发送流）、T-G3-05（回执跟踪/suppress）、T-G3-06（GATE-G3）已落码；**GATE-G3 已过门**。
 - **G5 撮合引擎（2026-10-25）已落码并过门**：`match/`（买方需求/卖方货源/匹配对 + 信号结构化 + 五维打分 + 编排 + 撮合介绍/联系）+ `005_match` + `006_contact_email` 迁移；真实服务冒烟 **10/10**（healthz→建需求/货源→run 匹配 1 对 score 90→reasons 可解释→介绍渲染→联系路由→accept）。
@@ -11,7 +19,7 @@
 - **定级**：growth-os 已登记 bayjf `docs/PROJECT-TIER-CONVENTION.md` Tier 0。
 - **注意**：本机默认 shell node 20 跑不了测试（`node:sqlite` 需 22.5+），用 `fnm use 22` 后再跑五门。
 
-- **基线**：14 个测试文件 / **84 用例全绿**；`typecheck` 0 错；`lint` 0 错；`tsc -p tsconfig.build.json` 构建出 `dist/`；sqlite + postgres 迁移各 6 份（`001_research`、`002_crm`、`003_outreach`、`004_outreach`、`005_match`、`006_contact_email`，配对）。
+- **基线**：18 个测试文件 / **104 用例全绿**；`typecheck` 0 错；`lint` 0 错；`tsc -p tsconfig.build.json` 构建出 `dist/`；sqlite + postgres 迁移各 7 份（`001_research`、`002_crm`、`003_outreach`、`004_outreach`、`005_match`、`006_contact_email`、`007_callback_events`，配对）。
 - **G1 已落码并实测通过**：
   - 只读搜索连接器 `research/provider/`：`OfflineSearchProvider`（确定性回放 `recordings/search/fixtures.json`，默认）、`OnlineSearchProvider`（Tavily 风格 REST，GET 只读）、`registry`（online 缺凭据 → 拒绝型 provider，run 返回 422，**不静默回退离线**）。
   - 信号引擎：`collector.ts`（规范化 + 指纹去重，指纹 = sha256(规范化 URL) 截 16）、`scoring.ts`（0–100 确定性打分，类型/来源/新鲜度/关键词四项加权，分项可解释，新鲜度半衰期 30 天、无日期取中性 0.5）。
@@ -76,13 +84,16 @@
 - T-G5-05 撮合闭环 + GATE-G5：`match-e2e.test.ts` 需求信号+货源信号→撮合；真实服务冒烟 8/8。
 - 撮合联系（FR-22）：`MatchService.buildIntroduction` 生成撮合介绍 + `contactMatch` 路由到 outreach（撮合实体 email → 自动建 contact/lead/campaign/draft，缺 email 回退 ownerEmail）；`006_contact_email` 迁移加 email 列 + structurer extractEmail；`OutreachService.createContactDraft` 直接指定收件人建草稿。
 
-## 测试覆盖（tests/，14 文件 / 81 用例）
+## 测试覆盖（tests/，18 文件 / 104 用例）
 
+- `outreach-http.test.ts`（6）：回调 secret 未配置 fail-closed 401、缺签/错签/错钥 401 且零副作用、签名退信 suppress + eventId 重放幂等、缺 eventId 400、签名回复回流单条 followup + 重放返回首次结果、未知 messageId 404。
+- `boot.test.ts`（5）：GROWTH_API_TOKEN 缺失/空串拒启、配置正常、姿态行 set/unset 与模式映射。
+- `secure-compare.test.ts`（4）：相等/同长不等/异长不抛/空串语义。
 - `matcher.test.ts`（7）：五维打分各维度边界、品类 mismatch/general、价格数量越界、同地区 vs 跨境、缺字段中性。
 - `structurer.test.ts`（8）：demand/offer/unknown 分类、品类/数量/价格/地区提取、缺字段不填。
 - `match.test.ts`（3）：需求/货源/匹配 CRUD。
 - `match-service.test.ts`（5）：校验、幂等匹配、阈值、accept/reject、信号 ingest。
-- `match-e2e.test.ts`（1）：需求信号+货源信号→撮合闭环。
+- `match-e2e.test.ts`（4）：需求信号+货源信号→撮合闭环、介绍渲染、联系路由。
 - `outreach.test.ts`（8）：campaign/草稿创建、无邮箱 lead 跳过、submit→approve→send 审计链、reject、zeus off 零外发强反证、退信 suppress 拦发送、回复回流 followup、未知 messageId 404。
 - `mail.test.ts`（5）：off 模式 fail-closed 503、smtp 缺 host/from 422、live 适配器、jsonTransport 发送返回 messageId、send 失败 → MAIL_UNAVAILABLE 503。
 - `decision.test.ts`（6）：off 模式 fail-closed 503、online 缺凭据 422、live 适配器、decide 返回分级、网络失败/非 2xx → DECISION_UNAVAILABLE 503。
@@ -106,6 +117,7 @@
 - [x] GATE-G5：已过门（2026-10-25，81 用例 + 真实服务冒烟 7/7 撮合闭环）。
 - [x] G5 撮合引擎（T-G5-01~05 全部完成：数据模型/结构化/匹配/API/闭环）。
 - [ ] G4 运营化（外部依赖：真实云/域名/密钥/合规；含 SPF/DKIM/DMARC 与跨境数据评估）。
+- [ ] Tier0 评审 P2 挂账（2026-10-30 报告，本批未做）：非 GrowthError 的 500 回显 `err.message`（`src/api/research-http.ts` 等 onError）；lead 状态写与 `lead_events` 审计两次非原子写（H4，`src/crm/repository.ts` + `src/crm/lead-service.ts`）。
 - [ ] T-G2-05 回访 watch 真实化 —— **2026-10-27 复核挂账**（growth-os 仓零代码改动；基线 14 文件/84 用例全绿复核通过，HEAD d9490f7）。
   - 只读核对 zeus（未改 zeus 仓）：watch 触发面已 boot 装配——`POST/GET/DELETE /api/watches`、`POST /api/watch-tick`（bearer、caller 驱动节拍，内核不持定时器；zeus `src/http/server.ts` ~L2644-2770、`src/state/boot.ts` 装配 WatchRegistry + runWatchTick）；watch 读数源仅三：`metrics`（zeus 内核自指标）、`realm`（仅 entryCount / lastItemModifiedAt 两个元数据）、`connector`（须握手注册的声明工具，出站走 zeus 守卫）。`packages/zeus-client` 只导出 Decision API v1，无 watch/realm/intent 面。
   - 结论：growth-os 的 CRM followup 对 zeus tick 完全不可见，单仓离线无法闭合「由 zeus tick 驱动到期提醒」：(a) growth-os 不是 zeus connector（缺声明/握手接入，跨仓）；(b) realm 读数无逐条 due 语义，即便能 push 条目也表达不了「followup F 到期」；(c) 唯一能写提醒的 `POST /api/intents` 是 skill dispatch 门（tier-1 对未注册 skill 拒 403 skill_unavailable），不是人审提醒登记口，growth-os 在 zeus 无注册 skill。
