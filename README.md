@@ -74,6 +74,13 @@ npm run check:migrations && npm run typecheck && npm run lint && npm test && npm
 See `.env.example`. Every secret is env-only; nothing sensitive is stored in
 the database or committed.
 
+### Auth (fail-closed)
+
+`GROWTH_API_TOKEN` is required: the server refuses to boot without it, and
+every `/api/v1/*` route then demands `Authorization: Bearer <token>` compared
+in constant time (Tier0 review 2026-10-30 H1). The MCP endpoint `/mcp` uses
+`GROWTH_MCP_TOKEN` when set. The boot log prints the active auth posture.
+
 ## Layout
 
 ```
