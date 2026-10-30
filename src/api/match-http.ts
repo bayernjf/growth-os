@@ -1,7 +1,6 @@
 import { Hono } from 'hono';
-import type { ContentfulStatusCode } from 'hono/utils/http-status';
-import { GrowthError } from '../research/errors.js';
 import type { MatchService } from '../match/match-service.js';
+import { growthOnError } from './on-error.js';
 import { secureEqual } from '../util/hash.js';
 
 export interface MatchAppDeps {
@@ -22,15 +21,7 @@ export function createMatchApp(deps: MatchAppDeps): Hono {
     await next();
   });
 
-  app.onError((err, c) => {
-    if (err instanceof GrowthError) {
-      return c.json(err.toBody(), err.status as ContentfulStatusCode);
-    }
-    return c.json(
-      { code: 'INTERNAL', message: err instanceof Error ? err.message : 'unknown error', retryable: false },
-      500,
-    );
-  });
+  app.onError(growthOnError);
 
   // buyer demands
   app.post('/api/v1/match/demands', async (c) => {
