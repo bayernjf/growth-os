@@ -135,9 +135,14 @@ export class LeadService {
       throw Errors.invalidTransition(`cannot move lead from ${lead.status} to ${toStatus}`);
     }
     const now = this.now();
-    const changes = await this.repo.setLeadStatus(id, toStatus, now);
+    const { changes } = await this.repo.transitionLeadStatus(
+      id,
+      lead.status,
+      toStatus,
+      note,
+      now,
+    );
     if (changes === 0) throw Errors.notFound(`lead ${id}`);
-    await this.repo.recordTransition(id, lead.status, toStatus, note, now);
     const updated = await this.repo.getLead(id);
     if (!updated) throw Errors.notFound(`lead ${id}`);
     return updated;

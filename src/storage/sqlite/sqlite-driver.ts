@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
-import type { StorageDriver } from '../driver.js';
+import type { StorageDriver, StorageTxn } from '../driver.js';
 
 // Loaded via createRequire so bundlers/test runners that predate the
 // experimental node:sqlite module (and strip the `node:` prefix) leave it
@@ -36,6 +36,34 @@ export class SqliteDriver implements StorageDriver {
 
   async exec(sql: string): Promise<void> {
     this.db.exec(sql);
+  }
+
+  async transaction<T>(fn: (tx: StorageTxn) => Promise<T>): Promise<T> {
+    // IMMEDIATE acquires the write lock up front so two writers fail fast
+    // instead of deadlocking inside the callback.
+    const txn: StorageTxn = {
+      all: (sql, params = []) =>
+        Promise.resolve(
+          this.db.prepare(sql).all(...(params as SQLInputValue[])) as never,
+        ),
+      get: (sql, params = []) =>
+        Promise.resolve(
+          this.db.prepare(sql).get(...(params as SQLInputValue[])) as never,
+        ),
+      run: (sql, params = []) => {
+        const result = this.db.prepare(sql).run(...(params as SQLInputValue[]));
+        return Promise.resolve({ changes: Number(result.changes ?? 0) });
+      },
+    };
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const result = await fn(txn);
+      this.db.exec('COMMIT');
+      return result;
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
   }
 
   async close(): Promise<void> {

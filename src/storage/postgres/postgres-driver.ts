@@ -1,4 +1,4 @@
-import type { StorageDriver } from '../driver.js';
+import type { StorageDriver, StorageTxn } from '../driver.js';
 
 /**
  * Postgres driver for production. The `pg` package is an optional
@@ -62,6 +62,36 @@ export class PostgresDriver implements StorageDriver {
 
   async exec(sql: string): Promise<void> {
     await this.client.query(sql);
+  }
+
+  async transaction<T>(fn: (tx: StorageTxn) => Promise<T>): Promise<T> {
+    const { toDollarParams } = PostgresDriver;
+    const txn: StorageTxn = {
+      all: async (sql, params = []) => {
+        const { text } = toDollarParams(sql);
+        const result = await this.client.query(text, [...params]);
+        return result.rows as never;
+      },
+      get: async (sql, params = []) => {
+        const { text } = toDollarParams(sql);
+        const result = await this.client.query(text, [...params]);
+        return result.rows[0] as never;
+      },
+      run: async (sql, params = []) => {
+        const { text } = toDollarParams(sql);
+        const result = await this.client.query(text, [...params]);
+        return { changes: result.rowCount };
+      },
+    };
+    await this.client.query('BEGIN');
+    try {
+      const result = await fn(txn);
+      await this.client.query('COMMIT');
+      return result;
+    } catch (error) {
+      await this.client.query('ROLLBACK');
+      throw error;
+    }
   }
 
   async close(): Promise<void> {
