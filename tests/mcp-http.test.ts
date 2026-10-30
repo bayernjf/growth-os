@@ -1,7 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { createMcpApp } from '../src/api/mcp-http.js';
 
-function app(service = { listDueFollowups: async () => [] as never[] }) {
+// The default's `never[]` return type poisons object-literal fixtures passed
+// in later tests (TS2322), so pin the structural shape instead (Tier0 review
+// 2026-10-30 H3: the branch went red because typecheck never ran on it).
+type FollowupSource = { listDueFollowups: () => Promise<unknown[]> };
+
+function app(service: FollowupSource = { listDueFollowups: async () => [] }) {
   return createMcpApp({ service: service as never });
 }
 
