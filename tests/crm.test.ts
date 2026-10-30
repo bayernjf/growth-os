@@ -8,6 +8,7 @@ import { ResearchRepository } from '../src/research/repository.js';
 import { ResearchService } from '../src/research/research-service.js';
 import { SqliteDriver } from '../src/storage/sqlite/sqlite-driver.js';
 import { migrateUp } from '../src/storage/migrate.js';
+import type { StorageDriver, StorageTxn } from '../src/storage/driver.js';
 
 const FIXED_NOW = '2026-10-25T00:00:00Z';
 const KEYWORDS = ['ai crm', 'cold email', 'outreach', 'personal agent', 'follow up', 'lead generation', 'sales'];
@@ -167,5 +168,80 @@ describe('lead -> contact attachment', () => {
     const lead = await leadService.createLead({ title: 'x' });
     const updated = await leadService.attachContact(lead.id, contact.id);
     expect(updated.contactId).toBe(contact.id);
+  });
+});
+
+/**
+ * Wraps a driver so the lead_events INSERT inside a transition transaction
+ * fails — used to prove the status UPDATE rolls back with the audit event.
+ */
+class FailingEventDriver implements StorageDriver {
+  readonly dialect = 'sqlite' as const;
+  constructor(private readonly inner: StorageDriver) {}
+  all<T>(sql: string, params?: readonly unknown[]): Promise<T[]> {
+    return this.inner.all<T>(sql, params);
+  }
+  get<T>(sql: string, params?: readonly unknown[]): Promise<T | undefined> {
+    return this.inner.get<T>(sql, params);
+  }
+  run(sql: string, params?: readonly unknown[]): Promise<{ changes: number }> {
+    return this.inner.run(sql, params);
+  }
+  exec(sql: string): Promise<void> {
+    return this.inner.exec(sql);
+  }
+  close(): Promise<void> {
+    return this.inner.close();
+  }
+  async transaction<T>(fn: (tx: StorageTxn) => Promise<T>): Promise<T> {
+    return this.inner.transaction((tx) =>
+      fn({
+        all: (sql, params) => tx.all(sql, params),
+        get: (sql, params) => tx.get(sql, params),
+        run: (sql, params) => {
+          if (sql.includes('INSERT INTO lead_events')) {
+            throw new Error('simulated transition event write failure');
+          }
+          return tx.run(sql, params);
+        },
+      }),
+    );
+  }
+}
+
+describe('lead transition atomicity', () => {
+  it('commits status change and transition event together', async () => {
+    const { leadService, crmRepo } = await makeStack();
+    const lead = await leadService.createLead({ title: 'Atomic lead' });
+
+    await leadService.transitionLead(lead.id, 'qualified');
+
+    const updated = await crmRepo.getLead(lead.id);
+    expect(updated?.status).toBe('qualified');
+    const events = await crmRepo.listLeadEvents(lead.id);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ fromStatus: 'new', toStatus: 'qualified' });
+  });
+
+  it('rolls back the status update when the transition event write fails', async () => {
+    const stack = await makeStack();
+    const lead = await stack.leadService.createLead({ title: 'Atomic lead' });
+    const failing = new FailingEventDriver(stack.driver);
+    const repo = new CrmRepository(failing);
+    const service = new LeadService({
+      repo,
+      signals: stack.researchRepo,
+      watch: new LocalWatch(repo),
+      leadMinScore: 60,
+      now: () => FIXED_NOW,
+    });
+
+    await expect(service.transitionLead(lead.id, 'qualified')).rejects.toThrow(
+      'simulated transition event write failure',
+    );
+
+    const untouched = await stack.crmRepo.getLead(lead.id);
+    expect(untouched?.status).toBe('new');
+    expect(await stack.crmRepo.listLeadEvents(lead.id)).toHaveLength(0);
   });
 });
