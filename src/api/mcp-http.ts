@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import type { LeadService } from '../crm/lead-service.js';
+import { secureEqual } from '../util/hash.js';
 
 export interface McpAppDeps {
   service: LeadService;
@@ -18,7 +19,7 @@ export function createMcpApp(deps: McpAppDeps): Hono {
   app.post('/mcp', async (c) => {
     if (deps.mcpToken) {
       const header = c.req.header('Authorization') ?? '';
-      if (header !== `Bearer ${deps.mcpToken}`) {
+      if (!secureEqual(header, `Bearer ${deps.mcpToken}`)) {
         return c.json(
           { jsonrpc: '2.0', id: null, error: { code: -32001, message: 'unauthorized' } },
           401,
