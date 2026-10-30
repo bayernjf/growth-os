@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
-import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { GrowthError } from '../research/errors.js';
 import type { ResearchService } from '../research/research-service.js';
 import type { SignalType } from '../research/types.js';
+import { growthOnError } from './on-error.js';
 import { secureEqual } from '../util/hash.js';
 
 export interface ResearchAppDeps {
@@ -25,15 +25,7 @@ export function createResearchApp(deps: ResearchAppDeps): Hono {
     await next();
   });
 
-  app.onError((err, c) => {
-    if (err instanceof GrowthError) {
-      return c.json(err.toBody(), err.status as ContentfulStatusCode);
-    }
-    return c.json(
-      { code: 'INTERNAL', message: err instanceof Error ? err.message : 'unknown error', retryable: false },
-      500,
-    );
-  });
+  app.onError(growthOnError);
 
   // topics
   app.post('/api/v1/research/topics', async (c) => {

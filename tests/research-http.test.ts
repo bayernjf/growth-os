@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { createResearchApp } from '../src/api/research-http.js';
 import { createSearchProvider } from '../src/research/provider/registry.js';
@@ -100,5 +100,28 @@ describe('research HTTP API', () => {
     });
     expect(run.status).toBe(422);
     expect((await run.json()) as { code: string }).toMatchObject({ code: 'CREDENTIAL_MISSING' });
+  });
+
+  it('returns a generic 500 and logs internally when a non-GrowthError escapes', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const app = await buildApp();
+      const res = await app.request('/api/v1/research/topics', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{"title": malformed',
+      });
+      expect(res.status).toBe(500);
+      const body = (await res.json()) as { code: string; message: string; retryable: boolean };
+      // The response must stay generic: no SyntaxError text, no driver details.
+      expect(body).toEqual({ code: 'INTERNAL', message: 'internal error', retryable: false });
+      // The original error only goes to the server log.
+      expect(errSpy).toHaveBeenCalledTimes(1);
+      const logged = errSpy.mock.calls.map((args) => args.map(String).join(' ')).join('\n');
+      expect(logged).toContain('unhandled error');
+      expect(logged).toContain('Unexpected token');
+    } finally {
+      errSpy.mockRestore();
+    }
   });
 });
