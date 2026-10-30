@@ -192,12 +192,40 @@ export class CrmRepository {
     return row ? this.mapLead(row) : undefined;
   }
 
-  async setLeadStatus(id: string, status: LeadStatus, now: string): Promise<number> {
-    const result = await this.driver.run(
-      'UPDATE leads SET status = ?, updated_at = ? WHERE id = ?',
-      [status, now, id],
-    );
-    return result.changes;
+  /**
+   * Update lead status and append its transition event in one transaction.
+   * Returns 0 (with nothing written) when the lead does not exist, preserving
+   * the previous setLeadStatus not-found semantics.
+   */
+  async transitionLeadStatus(
+    id: string,
+    fromStatus: LeadStatus,
+    toStatus: LeadStatus,
+    note: string,
+    now: string,
+  ): Promise<{ changes: number; event?: LeadEvent }> {
+    return this.driver.transaction(async (tx) => {
+      const result = await tx.run(
+        'UPDATE leads SET status = ?, updated_at = ? WHERE id = ?',
+        [toStatus, now, id],
+      );
+      if (result.changes === 0) return { changes: 0 };
+      const event: LeadEvent = {
+        id: newId('evt'),
+        leadId: id,
+        fromStatus,
+        toStatus,
+        note,
+        createdAt: now,
+      };
+      await tx.run(
+        `INSERT INTO lead_events
+          (id,lead_id,from_status,to_status,note,created_at)
+         VALUES (?,?,?,?,?,?)`,
+        [event.id, event.leadId, event.fromStatus, event.toStatus, event.note, event.createdAt],
+      );
+      return { changes: result.changes, event };
+    });
   }
 
   async attachContact(id: string, contactId: string, now: string): Promise<number> {
@@ -293,31 +321,6 @@ export class CrmRepository {
   }
 
   // ---------- events ----------
-
-  async recordTransition(
-    leadId: string,
-    fromStatus: LeadStatus,
-    toStatus: LeadStatus,
-    note: string,
-    now?: string,
-  ): Promise<LeadEvent> {
-    const ts = now ?? new Date().toISOString();
-    const event: LeadEvent = {
-      id: newId('evt'),
-      leadId,
-      fromStatus,
-      toStatus,
-      note,
-      createdAt: ts,
-    };
-    await this.driver.run(
-      `INSERT INTO lead_events
-        (id,lead_id,from_status,to_status,note,created_at)
-       VALUES (?,?,?,?,?,?)`,
-      [event.id, event.leadId, event.fromStatus, event.toStatus, event.note, event.createdAt],
-    );
-    return event;
-  }
 
   async listLeadEvents(leadId: string): Promise<LeadEvent[]> {
     const rows = await this.driver.all<EventRow>(
