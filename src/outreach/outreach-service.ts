@@ -204,6 +204,38 @@ export class OutreachService {
     return this.leads.addFollowup(lead.id, { action: 'reply', note: `from ${from}: ${text}` });
   }
 
+  // ---------- signed receipt callbacks (Tier0 review 2026-10-30 P1) ----------
+
+  /**
+   * Signed bounce callback, idempotent by callback event id: a replay returns
+   * the first result and must not touch the suppress list again.
+   */
+  async recordBounceCallback(eventId: string, email: string): Promise<{ ok: true }> {
+    const existing = await this.repo.getCallbackEvent(eventId);
+    if (existing) return existing.result as { ok: true };
+    await this.repo.addSuppressed(email, 'bounce', this.now());
+    const result = { ok: true } as const;
+    await this.repo.recordCallbackEvent(eventId, 'bounce', result, this.now());
+    return result;
+  }
+
+  /**
+   * Signed reply callback, idempotent by callback event id: a replay returns
+   * the followup created by the first delivery and must not add another one.
+   */
+  async recordReplyCallback(
+    eventId: string,
+    messageId: string,
+    from: string,
+    text: string,
+  ): Promise<{ followup: LeadFollowup }> {
+    const existing = await this.repo.getCallbackEvent(eventId);
+    if (existing) return existing.result as { followup: LeadFollowup };
+    const followup = await this.recordReply(messageId, from, text);
+    await this.repo.recordCallbackEvent(eventId, 'reply', { followup }, this.now());
+    return { followup };
+  }
+
   private async mustGetDraft(id: string): Promise<OutreachDraft> {
     const draft = await this.repo.getDraft(id);
     if (!draft) throw Errors.notFound(`draft ${id}`);

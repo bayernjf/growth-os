@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { Hono } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { GrowthError } from '../research/errors.js';
@@ -7,6 +8,30 @@ import { secureEqual } from '../util/hash.js';
 export interface OutreachAppDeps {
   service: OutreachService;
   apiToken?: string | undefined;
+  /** HMAC-SHA256 secret for signed bounce/reply receipt callbacks. */
+  callbackSecret?: string | undefined;
+}
+
+const SIGNATURE_HEADER = 'X-Growth-Signature';
+
+/**
+ * Verify `X-Growth-Signature: v1=<hex HMAC-SHA256(secret, rawBody)>` against
+ * the exact raw request bytes (Tier0 review 2026-10-30 P1). Hex digests are
+ * compared in constant time via secureEqual.
+ */
+function verifyCallbackSignature(rawBody: ArrayBuffer, header: string | undefined, secret: string): boolean {
+  if (!header || !header.startsWith('v1=')) return false;
+  const expected = createHmac('sha256', secret).update(Buffer.from(rawBody)).digest('hex');
+  return secureEqual(expected, header.slice(3));
+}
+
+/** Parse a signed callback body from raw bytes; invalid JSON fails closed. */
+function parseCallbackBody(rawBody: ArrayBuffer): Record<string, unknown> {
+  try {
+    return JSON.parse(new TextDecoder().decode(rawBody)) as Record<string, unknown>;
+  } catch {
+    throw new GrowthError('VALIDATION_FAILED', 'callback body must be valid JSON', 400);
+  }
 }
 
 export function createOutreachApp(deps: OutreachAppDeps): Hono {
@@ -84,19 +109,56 @@ export function createOutreachApp(deps: OutreachAppDeps): Hono {
 
   app.get('/api/v1/outreach/suppressed', async (c) => c.json(await deps.service.listSuppressed()));
 
+  // Signed receipt callbacks (Tier0 review 2026-10-30 P1): these routes can
+  // mutate the suppress list and CRM, so each request must carry an
+  // HMAC-SHA256 signature over the raw body bytes and an eventId that makes
+  // processing idempotent. Without a configured secret they fail closed.
   app.post('/api/v1/outreach/receipts/bounce', async (c) => {
-    const body = (await c.req.json()) as Record<string, unknown>;
+    if (!deps.callbackSecret) {
+      return c.json(
+        {
+          code: 'UNAUTHORIZED',
+          message: 'callback secret is not configured (GROWTH_OUTREACH_CALLBACK_SECRET); callbacks fail closed',
+          retryable: false,
+        },
+        401,
+      );
+    }
+    const rawBody = await c.req.arrayBuffer();
+    if (!verifyCallbackSignature(rawBody, c.req.header(SIGNATURE_HEADER), deps.callbackSecret)) {
+      return c.json({ code: 'UNAUTHORIZED', message: 'missing or invalid callback signature', retryable: false }, 401);
+    }
+    const body = parseCallbackBody(rawBody);
+    const eventId = String(body.eventId ?? '');
+    if (!eventId) throw new GrowthError('VALIDATION_FAILED', 'eventId is required', 400);
     const email = String(body.email ?? '');
     if (!email) throw new GrowthError('VALIDATION_FAILED', 'email is required', 400);
-    await deps.service.recordBounce(email);
+    await deps.service.recordBounceCallback(eventId, email);
     return c.json({ ok: true });
   });
 
   app.post('/api/v1/outreach/receipts/reply', async (c) => {
-    const body = (await c.req.json()) as Record<string, unknown>;
+    if (!deps.callbackSecret) {
+      return c.json(
+        {
+          code: 'UNAUTHORIZED',
+          message: 'callback secret is not configured (GROWTH_OUTREACH_CALLBACK_SECRET); callbacks fail closed',
+          retryable: false,
+        },
+        401,
+      );
+    }
+    const rawBody = await c.req.arrayBuffer();
+    if (!verifyCallbackSignature(rawBody, c.req.header(SIGNATURE_HEADER), deps.callbackSecret)) {
+      return c.json({ code: 'UNAUTHORIZED', message: 'missing or invalid callback signature', retryable: false }, 401);
+    }
+    const body = parseCallbackBody(rawBody);
+    const eventId = String(body.eventId ?? '');
+    if (!eventId) throw new GrowthError('VALIDATION_FAILED', 'eventId is required', 400);
     const messageId = String(body.messageId ?? '');
     if (!messageId) throw new GrowthError('VALIDATION_FAILED', 'messageId is required', 400);
-    const followup = await deps.service.recordReply(
+    const { followup } = await deps.service.recordReplyCallback(
+      eventId,
       messageId,
       String(body.from ?? ''),
       String(body.text ?? ''),

@@ -80,7 +80,7 @@ async function main(): Promise<void> {
   const app = new Hono();
   app.route('/', createResearchApp({ service: researchService, apiToken: config.apiToken }));
   app.route('/', createCrmApp({ service: crmService, apiToken: config.apiToken }));
-  app.route('/', createOutreachApp({ service: outreachService, apiToken: config.apiToken }));
+  app.route('/', createOutreachApp({ service: outreachService, apiToken: config.apiToken, callbackSecret: config.outreachCallbackSecret }));
   app.route('/', createMatchApp({ service: matchService, apiToken: config.apiToken }));
   app.route('/', createMcpApp({ service: crmService, mcpToken: config.mcpToken }));
 

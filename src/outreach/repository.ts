@@ -3,6 +3,8 @@
 import type { StorageDriver } from '../storage/driver.js';
 import { newId } from '../util/hash.js';
 import type {
+  CallbackEvent,
+  CallbackEventKind,
   Campaign,
   CampaignInput,
   OutreachDraft,
@@ -47,6 +49,13 @@ interface EventRow {
 interface SuppressedRow {
   email: string;
   reason: string;
+  created_at: string;
+}
+
+interface CallbackEventRow {
+  id: string;
+  kind: string;
+  result: string;
   created_at: string;
 }
 
@@ -270,5 +279,28 @@ export class OutreachRepository {
   async findDraftByMessageId(messageId: string): Promise<OutreachDraft | undefined> {
     const row = await this.driver.get<DraftRow>('SELECT * FROM outreach_drafts WHERE message_id = ?', [messageId]);
     return row ? this.mapDraft(row) : undefined;
+  }
+
+  // ---------- callback events (signed receipt idempotency) ----------
+
+  async getCallbackEvent(id: string): Promise<CallbackEvent | undefined> {
+    const row = await this.driver.get<CallbackEventRow>(
+      'SELECT * FROM outreach_callback_events WHERE id = ?',
+      [id],
+    );
+    if (!row) return undefined;
+    // JSON (de)serialization stays at the repository boundary.
+    return { id: row.id, kind: row.kind as CallbackEventKind, result: JSON.parse(row.result) as unknown, createdAt: row.created_at };
+  }
+
+  /** Insert-first-wins: returns false when the event id was already recorded. */
+  async recordCallbackEvent(id: string, kind: CallbackEventKind, result: unknown, now?: string): Promise<boolean> {
+    const ts = now ?? new Date().toISOString();
+    const r = await this.driver.run(
+      `INSERT INTO outreach_callback_events (id,kind,result,created_at) VALUES (?,?,?,?)
+       ON CONFLICT (id) DO NOTHING`,
+      [id, kind, JSON.stringify(result), ts],
+    );
+    return r.changes > 0;
   }
 }
