@@ -25,7 +25,6 @@ import { createMatchApp } from './api/match-http.js';
 import { MatchRepository } from './match/repository.js';
 import { MatchService } from './match/match-service.js';
 import { createMcpApp } from './api/mcp-http.js';
-import { assertFailClosedBoot } from './util/boot.js';
 import { assertFailClosedBoot, authPosture } from './util/boot.js';
 
 async function createDriver(): Promise<StorageDriver> {
