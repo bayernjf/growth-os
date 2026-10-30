@@ -25,6 +25,8 @@ import { createMatchApp } from './api/match-http.js';
 import { MatchRepository } from './match/repository.js';
 import { MatchService } from './match/match-service.js';
 import { createMcpApp } from './api/mcp-http.js';
+import { assertFailClosedBoot } from './util/boot.js';
+import { assertFailClosedBoot, authPosture } from './util/boot.js';
 
 async function createDriver(): Promise<StorageDriver> {
   const config = loadConfig();
@@ -46,6 +48,9 @@ async function main(): Promise<void> {
     process.loadEnvFile('.env');
   }
   const config = loadConfig();
+  // Fail-closed boot gate (Tier0 review 2026-10-30 H1): without a configured
+  // bearer token the /api/v1 surface would start wide open, so refuse to boot.
+  assertFailClosedBoot(config.apiToken);
   const driver = await createDriver();
   await migrateUp(driver);
 
@@ -81,6 +86,13 @@ async function main(): Promise<void> {
   app.route('/', createMcpApp({ service: crmService, mcpToken: config.mcpToken }));
 
   serve({ fetch: app.fetch, hostname: config.host, port: config.port }, () => {
+    // One line stating the current authorization posture so operators can
+    // tell from boot logs which guards are active (Tier0 review H1).
+    const posture = authPosture(config);
+    console.log(
+      `growth-os auth posture: mode=${posture.mode} researchBearer=${posture.researchBearer} ` +
+        `callbackSecret=${posture.callbackSecret} search=${posture.search} zeus=${posture.zeus} mail=${posture.mail}`,
+    );
     console.log(
       `growth-os listening on http://${config.host}:${config.port} (search=${config.searchMode}, db=${config.dbDriver})`,
     );
