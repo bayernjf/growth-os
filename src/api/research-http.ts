@@ -3,6 +3,7 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { GrowthError } from '../research/errors.js';
 import type { ResearchService } from '../research/research-service.js';
 import type { SignalType } from '../research/types.js';
+import { secureEqual } from '../util/hash.js';
 
 export interface ResearchAppDeps {
   service: ResearchService;
@@ -17,7 +18,7 @@ export function createResearchApp(deps: ResearchAppDeps): Hono {
   app.use('/api/v1/*', async (c, next) => {
     if (deps.apiToken) {
       const header = c.req.header('Authorization') ?? '';
-      if (header !== `Bearer ${deps.apiToken}`) {
+      if (!secureEqual(header, `Bearer ${deps.apiToken}`)) {
         return c.json({ code: 'UNAUTHORIZED', message: 'missing or invalid token', retryable: false }, 401);
       }
     }

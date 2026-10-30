@@ -48,3 +48,17 @@ export interface SuppressedEmail {
   reason: string;
   createdAt: string;
 }
+
+/** Kind of a signed receipt callback (bounce/reply), see outreach-http. */
+export type CallbackEventKind = 'bounce' | 'reply';
+
+/**
+ * Record of an already-processed signed callback. `result` is the snapshot of
+ * the first response body; replays return it instead of re-applying effects.
+ */
+export interface CallbackEvent {
+  id: string;
+  kind: CallbackEventKind;
+  result: unknown;
+  createdAt: string;
+}
