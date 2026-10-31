@@ -2,6 +2,8 @@ import { createHmac } from 'node:crypto';
 import { Hono } from 'hono';
 import { GrowthError } from '../research/errors.js';
 import type { OutreachService } from '../outreach/outreach-service.js';
+import { isEmailLocale } from '../mail/templates.js';
+import { verifyUnsubscribeToken } from '../mail/unsubscribe-token.js';
 import { growthOnError } from './on-error.js';
 import { secureEqual } from '../util/hash.js';
 
@@ -10,6 +12,8 @@ export interface OutreachAppDeps {
   apiToken?: string | undefined;
   /** HMAC-SHA256 secret for signed bounce/reply receipt callbacks. */
   callbackSecret?: string | undefined;
+  /** HMAC secret for one-click unsubscribe tokens (T-G3-07); unset fails closed. */
+  unsubscribeSecret?: string | undefined;
 }
 
 const SIGNATURE_HEADER = 'X-Growth-Signature';
@@ -53,10 +57,18 @@ export function createOutreachApp(deps: OutreachAppDeps): Hono {
   app.post('/api/v1/outreach/campaigns', async (c) => {
     const body = (await c.req.json()) as Record<string, unknown>;
     const leadIds = Array.isArray(body.leadIds) ? body.leadIds.map(String) : [];
+    let locale: 'en' | 'zh' | undefined;
+    if (body.locale !== undefined) {
+      if (!isEmailLocale(body.locale)) {
+        throw new GrowthError('VALIDATION_FAILED', 'locale must be one of en, zh', 400);
+      }
+      locale = body.locale;
+    }
     const result = await deps.service.createCampaign(
       {
         name: String(body.name ?? ''),
         ...(body.topicId !== undefined ? { topicId: String(body.topicId) } : {}),
+        ...(locale ? { locale } : {}),
       },
       leadIds,
     );
@@ -156,6 +168,30 @@ export function createOutreachApp(deps: OutreachAppDeps): Hono {
       String(body.text ?? ''),
     );
     return c.json(followup, 201);
+  });
+
+  // One-click unsubscribe (T-G3-07, design §14.2.1). Public on purpose: the
+  // link inside sent emails must work without a Bearer token. The token binds
+  // the recipient email with an HMAC, so this endpoint cannot suppress
+  // arbitrary addresses. Without a configured secret it fails closed.
+  app.post('/pub/v1/outreach/unsubscribe', async (c) => {
+    if (!deps.unsubscribeSecret) {
+      return c.json(
+        {
+          code: 'CREDENTIAL_MISSING',
+          message: 'unsubscribe secret is not configured (GROWTH_MAIL_UNSUBSCRIBE_SECRET); fail closed',
+          retryable: false,
+        },
+        422,
+      );
+    }
+    const body = await c.req.json().catch(() => null) as Record<string, unknown> | null;
+    const token = String(body?.token ?? '');
+    if (!token) throw new GrowthError('VALIDATION_FAILED', 'token is required', 400);
+    const email = verifyUnsubscribeToken(token, deps.unsubscribeSecret);
+    if (!email) throw new GrowthError('VALIDATION_FAILED', 'invalid unsubscribe token', 400);
+    await deps.service.suppressEmail(email, 'unsubscribe');
+    return c.json({ ok: true });
   });
 
   return app;
