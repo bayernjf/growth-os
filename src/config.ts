@@ -27,6 +27,12 @@ export interface AppConfig {
   mailUser?: string | undefined;
   mailPass?: string | undefined;
   mailFrom?: string | undefined;
+  /** Sender identity / physical address statement (§14.2.1), rendered in the footer. */
+  mailIdentity?: string | undefined;
+  /** Public base URL for the one-click unsubscribe endpoint. */
+  mailUnsubscribeBaseUrl?: string | undefined;
+  /** HMAC secret for one-click unsubscribe tokens (kept separate from callback signing). */
+  mailUnsubscribeSecret?: string | undefined;
   leadMinScore: number;
   mcpToken?: string | undefined;
   outreachCallbackSecret?: string | undefined;
@@ -63,6 +69,9 @@ export function loadConfig(): AppConfig {
     mailUser: process.env.GROWTH_MAIL_USER || undefined,
     mailPass: process.env.GROWTH_MAIL_PASS || undefined,
     mailFrom: process.env.GROWTH_MAIL_FROM || undefined,
+    mailIdentity: process.env.GROWTH_MAIL_IDENTITY || undefined,
+    mailUnsubscribeBaseUrl: process.env.GROWTH_MAIL_UNSUBSCRIBE_BASE_URL || undefined,
+    mailUnsubscribeSecret: process.env.GROWTH_MAIL_UNSUBSCRIBE_SECRET || undefined,
     leadMinScore: num('LEAD_MIN_SCORE', 60),
     mcpToken: process.env.GROWTH_MCP_TOKEN || undefined,
     outreachCallbackSecret: process.env.GROWTH_OUTREACH_CALLBACK_SECRET || undefined,

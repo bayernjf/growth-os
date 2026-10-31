@@ -14,12 +14,37 @@ export function assertFailClosedBoot(apiToken: string | undefined): asserts apiT
   }
 }
 
+/**
+ * T-G3-07 compliance gate (design §14.2.1): every outbound email must carry a
+ * usable one-click unsubscribe link and a sender identity. A configured SMTP
+ * channel therefore requires the unsubscribe base URL, the unsubscribe token
+ * secret and the sender identity statement; without them the server refuses
+ * to boot rather than sending non-compliant mail.
+ */
+export function assertMailCompliance(
+  config: Pick<AppConfig, 'mailMode' | 'mailIdentity' | 'mailUnsubscribeBaseUrl' | 'mailUnsubscribeSecret'>,
+): void {
+  if (config.mailMode !== 'smtp') return;
+  const missing: string[] = [];
+  if (!config.mailIdentity) missing.push('GROWTH_MAIL_IDENTITY');
+  if (!config.mailUnsubscribeBaseUrl) missing.push('GROWTH_MAIL_UNSUBSCRIBE_BASE_URL');
+  if (!config.mailUnsubscribeSecret) missing.push('GROWTH_MAIL_UNSUBSCRIBE_SECRET');
+  if (missing.length > 0) {
+    throw new Error(
+      `GROWTH_MAIL_MODE=smtp requires compliance config (design §14.2.1): ${missing.join(', ')}; ` +
+        'every outbound email needs a sender identity and a one-click unsubscribe link',
+    );
+  }
+}
+
 export interface AuthPosture {
   mode: 'fail-closed';
   /** Bearer guard on /api/v1 (research/crm/outreach/match). */
   researchBearer: 'set' | 'unset';
   /** HMAC secret for bounce/reply receipt callbacks. */
   callbackSecret: 'set' | 'unset';
+  /** HMAC secret for one-click unsubscribe tokens (T-G3-07). */
+  unsubscribe: 'set' | 'unset';
   search: 'offline' | 'online';
   zeus: 'off' | 'online';
   mail: 'off' | 'smtp';
@@ -27,12 +52,21 @@ export interface AuthPosture {
 
 /** Pure description of the boot authorization posture for the startup log. */
 export function authPosture(
-  config: Pick<AppConfig, 'apiToken' | 'outreachCallbackSecret' | 'searchMode' | 'zeusMode' | 'mailMode'>,
+  config: Pick<
+    AppConfig,
+    | 'apiToken'
+    | 'outreachCallbackSecret'
+    | 'mailUnsubscribeSecret'
+    | 'searchMode'
+    | 'zeusMode'
+    | 'mailMode'
+  >,
 ): AuthPosture {
   return {
     mode: 'fail-closed',
     researchBearer: config.apiToken ? 'set' : 'unset',
     callbackSecret: config.outreachCallbackSecret ? 'set' : 'unset',
+    unsubscribe: config.mailUnsubscribeSecret ? 'set' : 'unset',
     search: config.searchMode,
     zeus: config.zeusMode,
     mail: config.mailMode,

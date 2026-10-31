@@ -29,6 +29,8 @@ interface DraftRow {
   to_email: string;
   subject: string;
   body_text: string;
+  locale: string;
+  body_html: string | null;
   status: string;
   decision_id: string | null;
   message_id: string | null;
@@ -115,9 +117,11 @@ export class OutreachRepository {
     toEmail: string,
     subject: string,
     bodyText: string,
-    now?: string,
+    now: string,
+    locale = 'en',
+    bodyHtml?: string,
   ): Promise<OutreachDraft> {
-    const ts = now ?? new Date().toISOString();
+    const ts = now;
     const draft: OutreachDraft = {
       id: newId('draft'),
       campaignId,
@@ -125,15 +129,29 @@ export class OutreachRepository {
       toEmail,
       subject,
       bodyText,
+      locale,
+      ...(bodyHtml ? { bodyHtml } : {}),
       status: 'draft',
       createdAt: ts,
       updatedAt: ts,
     };
     await this.driver.run(
       `INSERT INTO outreach_drafts
-        (id,campaign_id,lead_id,to_email,subject,body_text,status,created_at,updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?)`,
-      [draft.id, campaignId, leadId, toEmail, subject, bodyText, draft.status, ts, ts],
+        (id,campaign_id,lead_id,to_email,subject,body_text,locale,body_html,status,created_at,updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      [
+        draft.id,
+        campaignId,
+        leadId,
+        toEmail,
+        subject,
+        bodyText,
+        locale,
+        bodyHtml ?? null,
+        draft.status,
+        ts,
+        ts,
+      ],
     );
     return draft;
   }
@@ -159,6 +177,8 @@ export class OutreachRepository {
       toEmail: row.to_email,
       subject: row.subject,
       bodyText: row.body_text,
+      locale: row.locale,
+      ...(row.body_html ? { bodyHtml: row.body_html } : {}),
       status: row.status as OutreachDraft['status'],
       ...(row.decision_id ? { decisionId: row.decision_id } : {}),
       ...(row.message_id ? { messageId: row.message_id } : {}),

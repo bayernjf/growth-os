@@ -1,6 +1,8 @@
 // growth-os G3 outbound email domain types (campaigns / zeus-gated drafts /
 // audit events). A draft only becomes sendable after zeus sign-off.
 
+import type { EmailLocale } from '../mail/templates.js';
+
 export type DraftStatus = 'draft' | 'submitted' | 'approved' | 'rejected' | 'sent' | 'failed';
 export type CampaignStatus = 'draft' | 'ready' | 'sending' | 'done';
 export type OutreachEventType = 'created' | 'submitted' | 'approved' | 'rejected' | 'sent' | 'failed';
@@ -17,6 +19,8 @@ export interface Campaign {
 export interface CampaignInput {
   name: string;
   topicId?: string;
+  /** Rendering language for the drafts of this campaign (T-G3-07; default en). */
+  locale?: EmailLocale;
 }
 
 export interface OutreachDraft {
@@ -26,6 +30,10 @@ export interface OutreachDraft {
   toEmail: string;
   subject: string;
   bodyText: string;
+  /** Language used to render this draft (T-G3-07). */
+  locale: string;
+  /** Optional HTML rendering of the same draft, sent alongside the text part. */
+  bodyHtml?: string;
   status: DraftStatus;
   decisionId?: string;
   messageId?: string;
