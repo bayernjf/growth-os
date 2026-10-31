@@ -7,7 +7,7 @@ import { GrowthError } from '../research/errors.js';
  * bodies are intentional API errors and pass through unchanged, but any
  * other exception must not leak driver, table or stack details to the
  * client. The original error is logged server-side only and the response
- * body stays generic.
+ * is a generic ProblemDetails (RFC 9457) body.
  */
 export function growthOnError(err: Error, c: Context): Response {
   if (err instanceof GrowthError) {
@@ -18,5 +18,14 @@ export function growthOnError(err: Error, c: Context): Response {
       err instanceof Error ? (err.stack ?? err.message) : String(err)
     }`,
   );
-  return c.json({ code: 'INTERNAL', message: 'internal error', retryable: false }, 500);
+  return c.json(
+    {
+      type: 'about:blank',
+      title: 'Internal Server Error',
+      status: 500,
+      detail: 'internal error',
+      instance: c.req.path,
+    },
+    500,
+  );
 }

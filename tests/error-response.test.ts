@@ -26,11 +26,17 @@ describe('growthOnError (shared HTTP error handler)', () => {
     expect(await res.json()).toEqual({ code: 'NOT_FOUND', message: 'lead not found', retryable: false });
   });
 
-  it('returns a generic 500 body without echoing the original error text', async () => {
+  it('returns a generic ProblemDetails 500 body without echoing the original error text', async () => {
     const res = await app().request('/boom');
     expect(res.status).toBe(500);
-    const body = (await res.json()) as { code: string; message: string; retryable: boolean };
-    expect(body).toEqual({ code: 'INTERNAL', message: 'internal error', retryable: false });
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toEqual({
+      type: 'about:blank',
+      title: 'Internal Server Error',
+      status: 500,
+      detail: 'internal error',
+      instance: '/boom',
+    });
     expect(JSON.stringify(body)).not.toContain('ECONNREFUSED');
     expect(JSON.stringify(body)).not.toContain('contact_messages');
   });

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { createMcpApp } from '../src/api/mcp-http.js';
 
 // The default's `never[]` return type poisons object-literal fixtures passed
@@ -56,6 +56,34 @@ describe('mcp streamable-http server', () => {
       params: { name: 'other.tool' },
     });
     expect(body.error).toBeDefined();
+  });
+
+  it('returns a generic ProblemDetails 500 without echoing unknown exception text', async () => {
+    // Tier0 review 2026-10-30 H2: a service exception escaping tools/call
+    // must not leak driver or table details through the JSON-RPC body.
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const failing = app({
+      listDueFollowups: async () => {
+        throw new Error('ECONNREFUSED 10.0.0.5:5432 — relation leads missing');
+      },
+    });
+    try {
+      const { status, body } = await rpc(failing, {
+        jsonrpc: '2.0',
+        id: 9,
+        method: 'tools/call',
+        params: { name: 'crm.listDueFollowups' },
+      });
+      expect(status).toBe(500);
+      const raw = JSON.stringify(body);
+      expect(body).toMatchObject({ type: 'about:blank', status: 500, detail: 'internal error' });
+      expect(raw).not.toContain('ECONNREFUSED');
+      expect(raw).not.toContain('leads missing');
+      expect(errSpy).toHaveBeenCalledTimes(1);
+      expect(errSpy.mock.calls.map((args) => args.map(String).join(' ')).join(' ')).toContain('relation leads missing');
+    } finally {
+      errSpy.mockRestore();
+    }
   });
 
   it('enforces the mcp token when configured', async () => {

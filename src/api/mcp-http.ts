@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { LeadService } from '../crm/lead-service.js';
 import { secureEqual } from '../util/hash.js';
+import { growthOnError } from './on-error.js';
 
 export interface McpAppDeps {
   service: LeadService;
@@ -15,6 +16,10 @@ const PROTOCOL_VERSION = '2025-03-26';
 // `dueCount` through its bounded dot-path reader.
 export function createMcpApp(deps: McpAppDeps): Hono {
   const app = new Hono();
+
+  // Same contract as the other HTTP apps: GrowthError bodies pass through,
+  // unknown exceptions return a generic ProblemDetails 500 (no leak).
+  app.onError(growthOnError);
 
   app.post('/mcp', async (c) => {
     if (deps.mcpToken) {
