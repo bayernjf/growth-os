@@ -3,6 +3,7 @@
 
 import { Errors } from '../research/errors.js';
 import type { Signal } from '../research/types.js';
+import type { StorageTxn } from '../storage/driver.js';
 import type { CrmRepository } from './repository.js';
 import {
   LEAD_SOURCE_TYPES,
@@ -10,6 +11,7 @@ import {
   LEAD_TRANSITIONS,
   type Contact,
   type ContactInput,
+  type ImportedLeadInput,
   type Lead,
   type LeadEvent,
   type LeadFollowup,
@@ -121,6 +123,81 @@ export class LeadService {
       );
     }
     return created;
+  }
+
+  // ---------- generic import (T-G2-07) ----------
+
+  private validateImport(input: ImportedLeadInput): void {
+    if (!input.sourceRef || input.sourceRef.trim().length === 0) {
+      throw Errors.validation('import sourceRef is required');
+    }
+    if (!input.title || input.title.trim().length === 0) {
+      throw Errors.validation('lead title is required');
+    }
+    if (input.score !== undefined && (input.score < 0 || input.score > 100)) {
+      throw Errors.validation('score must be within 0..100');
+    }
+  }
+
+  private contactInputFor(input: ImportedLeadInput): ContactInput | undefined {
+    if (!input.contactName || input.contactName.trim().length === 0) return undefined;
+    return {
+      name: input.contactName.trim(),
+      ...(input.contactEmail ? { email: input.contactEmail } : {}),
+      ...(input.company ? { company: input.company } : {}),
+      sourceType: 'import',
+      sourceRefs: [input.sourceRef],
+    };
+  }
+
+  private leadInputFor(
+    input: ImportedLeadInput,
+    contactId?: string,
+  ): LeadInput {
+    return {
+      sourceType: 'import',
+      sourceRef: input.sourceRef,
+      ...(contactId ? { contactId } : {}),
+      title: input.title,
+      ...(input.summary ? { summary: input.summary } : {}),
+      ...(input.score !== undefined ? { score: input.score } : {}),
+    };
+  }
+
+  /** Import one record (webhook/manual). It enters the state machine as 'new'. */
+  async importLead(input: ImportedLeadInput): Promise<Lead> {
+    this.validateImport(input);
+    const now = this.now();
+    const contactInput = this.contactInputFor(input);
+    let contactId: string | undefined;
+    if (contactInput) {
+      const contact = await this.repo.createContact(contactInput, now);
+      contactId = contact.id;
+    }
+    return this.repo.createLead(this.leadInputFor(input, contactId), now);
+  }
+
+  /**
+   * Import a batch (CSV) atomically: every contact/lead is created in one
+   * transaction and any invalid row rolls the whole batch back.
+   */
+  async importLeadsBatch(inputs: ImportedLeadInput[]): Promise<Lead[]> {
+    if (inputs.length === 0) return [];
+    for (const input of inputs) this.validateImport(input);
+    const now = this.now();
+    return this.repo.transaction(async (tx: StorageTxn) => {
+      const leads: Lead[] = [];
+      for (const input of inputs) {
+        const contactInput = this.contactInputFor(input);
+        let contactId: string | undefined;
+        if (contactInput) {
+          const contact = await this.repo.createContactOnTx(tx, contactInput, now);
+          contactId = contact.id;
+        }
+        leads.push(await this.repo.createLeadOnTx(tx, this.leadInputFor(input, contactId), now));
+      }
+      return leads;
+    });
   }
 
   /** Move a lead through the state machine; illegal transitions fail closed. */
