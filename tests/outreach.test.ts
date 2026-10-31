@@ -5,6 +5,7 @@ import { CrmRepository } from '../src/crm/repository.js';
 import { createDecisionPort } from '../src/decision/registry.js';
 import type { DecisionPort } from '../src/decision/types.js';
 import type { MailPort, OutboundEmail } from '../src/mail/types.js';
+import type { DraftWriter } from '../src/outreach/content.js';
 import { TemplateDraftWriter } from '../src/outreach/content.js';
 import { OutreachRepository } from '../src/outreach/repository.js';
 import { OutreachService } from '../src/outreach/outreach-service.js';
@@ -66,7 +67,7 @@ class FakeMailPort implements MailPort {
   }
 }
 
-async function makeStack(options?: { decision?: DecisionPort }) {
+async function makeStack(options?: { decision?: DecisionPort; writer?: DraftWriter }) {
   const driver = new SqliteDriver(':memory:');
   await migrateUp(driver);
   const crmRepo = new CrmRepository(driver);
@@ -76,7 +77,7 @@ async function makeStack(options?: { decision?: DecisionPort }) {
   const service = new OutreachService({
     repo: outreachRepo,
     leads: crmRepo,
-    writer: new TemplateDraftWriter(),
+    writer: options?.writer ?? new TemplateDraftWriter(),
     decision,
     mail,
     now: () => FIXED_NOW,
@@ -222,6 +223,7 @@ describe('receipts and suppression (T-G3-05)', () => {
     const followup = await stack.service.recordReply('msg_1', 'jane@acme.com', 'Interested, call me.');
     expect(followup).toMatchObject({ leadId: lead.id, action: 'reply' });
     expect(followup.note).toContain('Interested, call me.');
+    expect(followup.note).toContain('[intent=interest, locale=en]');
   });
 
   it('fails closed on a reply for an unknown message id', async () => {
@@ -229,5 +231,65 @@ describe('receipts and suppression (T-G3-05)', () => {
     await expect(stack.service.recordReply('unknown', 'x@y.com', 'hi')).rejects.toMatchObject({
       code: 'NOT_FOUND',
     });
+  });
+});
+
+describe('multilingual outreach (T-G3-07)', () => {
+  const COMPLIANCE_WRITER = new TemplateDraftWriter(() => ({
+    identity: 'BayJF · owner@example.com',
+    unsubscribeUrl: 'https://growth-os.test/pub/v1/outreach/unsubscribe?token=t1',
+  }));
+
+  it('renders drafts in the campaign locale with compliance footer and html', async () => {
+    const stack = await makeStack({ writer: COMPLIANCE_WRITER });
+    const { lead } = await seedLead(stack.crmRepo);
+    const { drafts } = await stack.service.createCampaign({ name: 'intro', locale: 'zh' }, [lead.id]);
+    const draft = drafts[0]!;
+    expect(draft.locale).toBe('zh');
+    expect(draft.bodyText).toContain('你好');
+    expect(draft.bodyText).toContain('退订');
+    expect(draft.bodyText).toContain('BayJF');
+    expect(draft.bodyHtml).toContain('<p>');
+
+    const reloaded = await stack.outreachRepo.getDraft(draft.id);
+    expect(reloaded?.locale).toBe('zh');
+    expect(reloaded?.bodyHtml).toContain('退订');
+  });
+
+  it('defaults to en without a campaign locale', async () => {
+    const stack = await makeStack({ writer: COMPLIANCE_WRITER });
+    const { lead } = await seedLead(stack.crmRepo);
+    const { drafts } = await stack.service.createCampaign({ name: 'intro' }, [lead.id]);
+    expect(drafts[0]?.locale).toBe('en');
+    expect(drafts[0]?.bodyText).toContain('Hi');
+    expect(drafts[0]?.bodyText).toContain('Unsubscribe:');
+  });
+
+  it('sends the html part when the draft carries one', async () => {
+    const stack = await makeStack({ writer: COMPLIANCE_WRITER });
+    const { lead } = await seedLead(stack.crmRepo);
+    const { drafts } = await stack.service.createCampaign({ name: 'intro' }, [lead.id]);
+    const draft = drafts[0]!;
+    await stack.service.submitDraft(draft.id);
+    (stack.decision as FakeDecisionPort).verdicts['dec_1'] = 'approved';
+    await stack.service.checkApproval(draft.id);
+    await stack.service.sendDraft(draft.id);
+    expect(stack.mail.sent[0]?.html).toBeDefined();
+    expect(stack.mail.sent[0]?.html).toContain('</footer>');
+  });
+
+  it('tags reply follow-ups with intent and detected locale (offline, no fabrication)', async () => {
+    const stack = await makeStack();
+    const { lead } = await seedLead(stack.crmRepo);
+    const { drafts } = await stack.service.createCampaign({ name: 'intro' }, [lead.id]);
+    const draft = drafts[0]!;
+    await stack.service.submitDraft(draft.id);
+    (stack.decision as FakeDecisionPort).verdicts['dec_1'] = 'approved';
+    await stack.service.checkApproval(draft.id);
+    await stack.service.sendDraft(draft.id);
+
+    const followup = await stack.service.recordReply('msg_1', 'jane@acme.com', '有兴趣，想了解一下');
+    expect(followup.note).toContain('有兴趣，想了解一下');
+    expect(followup.note).toContain('[intent=interest, locale=zh]');
   });
 });

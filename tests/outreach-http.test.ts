@@ -8,6 +8,7 @@ import { TemplateDraftWriter } from '../src/outreach/content.js';
 import { OutreachRepository } from '../src/outreach/repository.js';
 import { OutreachService } from '../src/outreach/outreach-service.js';
 import { loadConfig } from '../src/config.js';
+import { signUnsubscribeToken } from '../src/mail/unsubscribe-token.js';
 import { migrateUp } from '../src/storage/migrate.js';
 import { SqliteDriver } from '../src/storage/sqlite/sqlite-driver.js';
 
@@ -17,7 +18,7 @@ function sign(body: string): string {
   return `v1=${createHmac('sha256', SECRET).update(body, 'utf8').digest('hex')}`;
 }
 
-async function buildApp(options?: { callbackSecret?: string }) {
+async function buildApp(options?: { callbackSecret?: string; unsubscribeSecret?: string }) {
   const driver = new SqliteDriver(':memory:');
   await migrateUp(driver);
   const crmRepo = new CrmRepository(driver);
@@ -35,6 +36,7 @@ async function buildApp(options?: { callbackSecret?: string }) {
     createOutreachApp({
       service,
       ...(options?.callbackSecret ? { callbackSecret: options.callbackSecret } : {}),
+      ...(options?.unsubscribeSecret ? { unsubscribeSecret: options.unsubscribeSecret } : {}),
     }),
   );
   return { app, crmRepo, outreachRepo, service };
@@ -152,5 +154,83 @@ describe('signed receipt callbacks (Tier0 review P1)', () => {
       body,
     });
     expect(res.status).toBe(404);
+  });
+});
+
+describe('multilingual campaign locale (T-G3-07)', () => {
+  it('accepts a valid locale and rejects unknown ones', async () => {
+    const { app, crmRepo } = await buildApp();
+    const contact = await crmRepo.createContact({ name: 'Jane Doe', email: 'jane@acme.com' });
+    const lead = await crmRepo.createLead({ title: 'AI outreach', contactId: contact.id });
+
+    const ok = await app.request('/api/v1/outreach/campaigns', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'zh intro', leadIds: [lead.id], locale: 'zh' }),
+    });
+    expect(ok.status).toBe(201);
+    const okBody = (await ok.json()) as { drafts: Array<{ locale: string }> };
+    expect(okBody.drafts[0]?.locale).toBe('zh');
+
+    const bad = await app.request('/api/v1/outreach/campaigns', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'fr intro', leadIds: [lead.id], locale: 'fr' }),
+    });
+    expect(bad.status).toBe(400);
+  });
+});
+
+describe('one-click unsubscribe endpoint (T-G3-07)', () => {
+  it('fails closed without a configured secret', async () => {
+    const { app, outreachRepo } = await buildApp();
+    const res = await app.request('/pub/v1/outreach/unsubscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: 'anything' }),
+    });
+    expect(res.status).toBe(422);
+    expect(await outreachRepo.listSuppressed()).toEqual([]);
+  });
+
+  it('suppresses the address bound to a valid token, idempotently', async () => {
+    const { app, outreachRepo } = await buildApp({ unsubscribeSecret: SECRET });
+    const token = signUnsubscribeToken('jane@acme.com', SECRET);
+    const body = JSON.stringify({ token });
+    const headers = { 'Content-Type': 'application/json' };
+
+    const first = await app.request('/pub/v1/outreach/unsubscribe', { method: 'POST', headers, body });
+    expect(first.status).toBe(200);
+    expect(await first.json()).toEqual({ ok: true });
+
+    const again = await app.request('/pub/v1/outreach/unsubscribe', { method: 'POST', headers, body });
+    expect(again.status).toBe(200);
+    expect(await outreachRepo.listSuppressed()).toEqual([
+      { email: 'jane@acme.com', reason: 'unsubscribe', createdAt: expect.any(String) },
+    ]);
+  });
+
+  it('rejects an invalid or tampered token without suppressing anything', async () => {
+    const { app, outreachRepo } = await buildApp({ unsubscribeSecret: SECRET });
+    const token = signUnsubscribeToken('jane@acme.com', SECRET);
+    const tampered = `${token.split('.')[0] ?? ''}.deadbeef`;
+    const res = await app.request('/pub/v1/outreach/unsubscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: tampered }),
+    });
+    expect(res.status).toBe(400);
+    expect(await outreachRepo.listSuppressed()).toEqual([]);
+  });
+
+  it('is public: no bearer token is required under /pub/v1', async () => {
+    const { app } = await buildApp({ unsubscribeSecret: SECRET });
+    const token = signUnsubscribeToken('jane@acme.com', SECRET);
+    const res = await app.request('/pub/v1/outreach/unsubscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    });
+    expect(res.status).toBe(200);
   });
 });

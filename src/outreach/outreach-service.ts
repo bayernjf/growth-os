@@ -5,6 +5,7 @@
 import type { Contact, ContactInput, Lead, LeadFollowup, LeadFollowupInput, LeadInput } from '../crm/types.js';
 import type { DecisionPort } from '../decision/types.js';
 import type { MailPort } from '../mail/types.js';
+import { OfflineReplyTranslator, type ReplyTranslator } from '../mail/reply-translator.js';
 import { Errors } from '../research/errors.js';
 import type { DraftWriter } from './content.js';
 import type { OutreachRepository } from './repository.js';
@@ -24,6 +25,8 @@ export interface OutreachServiceDeps {
   writer: DraftWriter;
   decision: DecisionPort;
   mail: MailPort;
+  /** Reply understanding/translation (T-G3-07); defaults to the offline translator. */
+  translator?: ReplyTranslator;
   now?: () => string;
 }
 
@@ -33,6 +36,7 @@ export class OutreachService {
   private readonly writer: DraftWriter;
   private readonly decision: DecisionPort;
   private readonly mail: MailPort;
+  private readonly translator: ReplyTranslator;
   private readonly now: () => string;
 
   constructor(deps: OutreachServiceDeps) {
@@ -41,6 +45,7 @@ export class OutreachService {
     this.writer = deps.writer;
     this.decision = deps.decision;
     this.mail = deps.mail;
+    this.translator = deps.translator ?? new OfflineReplyTranslator();
     this.now = deps.now ?? (() => new Date().toISOString());
   }
 
@@ -52,6 +57,7 @@ export class OutreachService {
     if (!input.name || input.name.trim().length === 0) {
       throw Errors.validation('campaign name is required');
     }
+    const locale = input.locale ?? 'en';
     const campaign = await this.repo.createCampaign(input, this.now());
     const drafts: OutreachDraft[] = [];
     for (const leadId of leadIds) {
@@ -60,8 +66,17 @@ export class OutreachService {
       const contact = lead.contactId ? await this.leads.getContact(lead.contactId) : undefined;
       const email = contact?.email ?? '';
       if (!email) continue;
-      const { subject, text } = await this.writer.write({ lead, ...(contact ? { contact } : {}) });
-      const draft = await this.repo.createDraft(campaign.id, leadId, email, subject, text, this.now());
+      const { subject, text, html } = await this.writer.write({ lead, ...(contact ? { contact } : {}), locale });
+      const draft = await this.repo.createDraft(
+        campaign.id,
+        leadId,
+        email,
+        subject,
+        text,
+        this.now(),
+        locale,
+        html,
+      );
       await this.repo.recordEvent(draft.id, 'created', '', {}, this.now());
       drafts.push(draft);
     }
@@ -163,6 +178,7 @@ export class OutreachService {
       to: draft.toEmail,
       subject: draft.subject,
       text: draft.bodyText,
+      ...(draft.bodyHtml ? { html: draft.bodyHtml } : {}),
       leadId: draft.leadId,
     });
     await this.repo.markSent(draft.id, sent.messageId, this.now());
@@ -201,7 +217,10 @@ export class OutreachService {
     if (!draft) throw Errors.notFound(`draft with messageId ${messageId}`);
     const lead = await this.leads.getLead(draft.leadId);
     if (!lead) throw Errors.notFound(`lead ${draft.leadId}`);
-    return this.leads.addFollowup(lead.id, { action: 'reply', note: `from ${from}: ${text}` });
+    const translated = await this.translator.translate(text, 'en');
+    const note =
+      `from ${from}: ${text} [intent=${translated.intent}, locale=${translated.detectedLocale}]`;
+    return this.leads.addFollowup(lead.id, { action: 'reply', note });
   }
 
   // ---------- signed receipt callbacks (Tier0 review 2026-10-30 P1) ----------

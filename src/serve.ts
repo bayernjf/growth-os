@@ -2,6 +2,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
+import type { AppConfig } from './config.js';
 import { loadConfig } from './config.js';
 import { createResearchApp } from './api/research-http.js';
 import { createCrmApp } from './api/crm-http.js';
@@ -19,6 +20,9 @@ import { ResearchService } from './research/research-service.js';
 import { createOutreachApp } from './api/outreach-http.js';
 import { createDecisionPort } from './decision/registry.js';
 import { createMailPort } from './mail/registry.js';
+import { signUnsubscribeToken } from './mail/unsubscribe-token.js';
+import type { EmailCompliance } from './mail/templates.js';
+import type { ComplianceFactory, DraftWriter } from './outreach/content.js';
 import { TemplateDraftWriter } from './outreach/content.js';
 import { OutreachRepository } from './outreach/repository.js';
 import { OutreachService } from './outreach/outreach-service.js';
@@ -26,7 +30,7 @@ import { createMatchApp } from './api/match-http.js';
 import { MatchRepository } from './match/repository.js';
 import { MatchService } from './match/match-service.js';
 import { createMcpApp } from './api/mcp-http.js';
-import { assertFailClosedBoot, authPosture } from './util/boot.js';
+import { assertFailClosedBoot, assertMailCompliance, authPosture } from './util/boot.js';
 
 async function createDriver(): Promise<StorageDriver> {
   const config = loadConfig();
@@ -41,6 +45,31 @@ async function createDriver(): Promise<StorageDriver> {
   return new SqliteDriver(config.sqlitePath);
 }
 
+/**
+ * Per-recipient compliance footer (T-G3-07, design §14.2.1): every outbound
+ * email carries the sender identity and a one-click unsubscribe link bound to
+ * the recipient's address with an HMAC token. The boot gate guarantees the
+ * three required settings when SMTP is enabled, so the factory never yields
+ * undefined in smtp mode.
+ */
+function complianceFactory(config: AppConfig): ComplianceFactory {
+  return (email: string): EmailCompliance | undefined => {
+    if (!config.mailIdentity || !config.mailUnsubscribeBaseUrl || !config.mailUnsubscribeSecret) {
+      return undefined;
+    }
+    const token = signUnsubscribeToken(email, config.mailUnsubscribeSecret);
+    const separator = config.mailUnsubscribeBaseUrl.includes('?') ? '&' : '?';
+    return {
+      identity: config.mailIdentity,
+      unsubscribeUrl: `${config.mailUnsubscribeBaseUrl}${separator}token=${encodeURIComponent(token)}`,
+    };
+  };
+}
+
+function buildDraftWriter(config: AppConfig): DraftWriter {
+  return new TemplateDraftWriter(complianceFactory(config));
+}
+
 async function main(): Promise<void> {
   // Load a local .env if present so GROWTH_* settings can live in a file.
   // Kept out of config.ts so unit tests import config without env side effects.
@@ -51,6 +80,9 @@ async function main(): Promise<void> {
   // Fail-closed boot gate (Tier0 review 2026-10-30 H1): without a configured
   // bearer token the /api/v1 surface would start wide open, so refuse to boot.
   assertFailClosedBoot(config.apiToken);
+  // Compliance gate (T-G3-07, design §14.2.1): an SMTP channel without the
+  // identity/unsubscribe settings would send non-compliant mail; refuse to boot.
+  assertMailCompliance(config);
   const driver = await createDriver();
   await migrateUp(driver);
 
@@ -70,7 +102,7 @@ async function main(): Promise<void> {
   const outreachService = new OutreachService({
     repo: outreachRepo,
     leads: crmRepo,
-    writer: new TemplateDraftWriter(),
+    writer: buildDraftWriter(config),
     decision: createDecisionPort(config),
     mail: createMailPort(config),
   });
@@ -82,7 +114,7 @@ async function main(): Promise<void> {
   app.route('/', createResearchApp({ service: researchService, apiToken: config.apiToken }));
   app.route('/', createCrmApp({ service: crmService, apiToken: config.apiToken }));
   app.route('/', createLeadImportApp({ service: crmService, apiToken: config.apiToken }));
-  app.route('/', createOutreachApp({ service: outreachService, apiToken: config.apiToken, callbackSecret: config.outreachCallbackSecret }));
+  app.route('/', createOutreachApp({ service: outreachService, apiToken: config.apiToken, callbackSecret: config.outreachCallbackSecret, unsubscribeSecret: config.mailUnsubscribeSecret }));
   app.route('/', createMatchApp({ service: matchService, apiToken: config.apiToken }));
   app.route('/', createMcpApp({ service: crmService, mcpToken: config.mcpToken }));
 
@@ -92,7 +124,8 @@ async function main(): Promise<void> {
     const posture = authPosture(config);
     console.log(
       `growth-os auth posture: mode=${posture.mode} researchBearer=${posture.researchBearer} ` +
-        `callbackSecret=${posture.callbackSecret} search=${posture.search} zeus=${posture.zeus} mail=${posture.mail}`,
+        `callbackSecret=${posture.callbackSecret} unsubscribe=${posture.unsubscribe} ` +
+        `search=${posture.search} zeus=${posture.zeus} mail=${posture.mail}`,
     );
     console.log(
       `growth-os listening on http://${config.host}:${config.port} (search=${config.searchMode}, db=${config.dbDriver})`,
