@@ -2,8 +2,14 @@
 
 > 状态主入口。开工前先读；每完成一个工作单元立即更新（已完成划掉、待办保留）。
 
-## Current state（2026-10-31，Tier0 评审修复 + 追补批次已落码并过门；G4 运营化待排）
+## Current state（2026-11-01，跨境增量 T-G3-07 多语言外联已落码并过门）
 
+- **T-G3-07 多语言外联（跨境增量 J4，2026-11-01）已落码并过门**（PR #7 合并 main，分支 feature/outreach-multilingual）：
+  - **多语言模板**：src/mail/templates.ts（renderEmailTemplate en/zh，默认 en 按设计 §14.3.3）输出 subject/text/html 三态；html 部分对收件人/线索内容 escapeHtml 防注入；无 compliance 时省略页脚。
+  - **回复理解翻译**：src/mail/reply-translator.ts（detectLocale / classifyReplyIntent：unsubscribe 优先、auto/question/interest/other / OfflineReplyTranslator 离线不编造翻译、保留原文，接口兼容在线实现）；recordReply note 追加 intent/locale 标注（PII 不落日志，§14.1.2）。
+  - **退订合规闭环（§14.2.1）**：src/mail/unsubscribe-token.ts（HMAC-SHA256 绑定邮箱的退订 token，常量时间校验、地址绑定）；公开端点 POST /pub/v1/outreach/unsubscribe（无 Bearer；缺 secret fail-closed 422；token 无效 400）；complianceFactory 注入 DraftWriter，每封外发邮件页脚含身份标识加退订链接；assertMailCompliance boot 门——smtp 模式缺 GROWTH_MAIL_IDENTITY / GROWTH_MAIL_UNSUBSCRIBE_BASE_URL / GROWTH_MAIL_UNSUBSCRIBE_SECRET 任一即拒启。
+  - **接线补齐**：campaign locale（http 校验 en/zh，非法 400）→ writer → 009_outreach_locale 双方言迁移（outreach_drafts 追加 body_html 列，locale 列一并落库）→ 草稿落库/发送均携带 html；sendDraft 有 html 时随邮件发送。
+  - **验证门五项全绿（24 文件 / 165 用例）**；真实启动冒烟：healthz 200、无 secret 退订 422、无 Bearer 401、posture 日志含 unsubscribe=、smtp 缺合规配置拒启（真实进程验证）。
 - **Tier0 评审追补批次（2026-10-31）已落码并过门**（同报告遗留项收尾）：
   - **H4 lead 状态 + 转换事件同事务（PR #2）**：`CrmRepository.transitionLeadStatus` 经 `StorageDriver.transaction` 把 lead 状态 UPDATE 与 `lead_events` 审计追加收进同一事务（sqlite/postgres 双驱动各自实现，审计写失败即回滚），消除"状态已变但无审计"的崩溃窗口。
   - **P2 500 回显泛化（本批）**：新增共享 `src/api/on-error.ts` `growthOnError` —— `GrowthError` 原样透传（既有错误码语义不变），其余异常一律 `{code:'INTERNAL', message:'internal error'}` 500，原文与栈只进服务端日志；research/crm/outreach/match 四个 HTTP 应用统一接入，不再回显驱动/表名等内部细节。
@@ -23,7 +29,7 @@
 - **定级**：growth-os 已登记 bayjf `docs/PROJECT-TIER-CONVENTION.md` Tier 0。
 - **注意**：本机默认 shell node 20 跑不了测试（`node:sqlite` 需 22.5+），用 `fnm use 22` 后再跑五门。
 
-- **基线**：19 个测试文件 / **110 用例全绿**；`typecheck` 0 错；`lint` 0 错；`tsc -p tsconfig.build.json` 构建出 `dist/`；sqlite + postgres 迁移各 7 份（`001_research`、`002_crm`、`003_outreach`、`004_outreach`、`005_match`、`006_contact_email`、`007_callback_events`，配对）。
+- **基线**：24 个测试文件 / **165 用例全绿**；`typecheck` 0 错；`lint` 0 错；`tsc -p tsconfig.build.json` 构建出 `dist/`；sqlite + postgres 迁移各 9 份（`001_research`、`002_crm`、`003_outreach`、`004_outreach`、`005_match`、`006_contact_email`、`007_callback_events`、`008_lead_import`、`009_outreach_locale`，配对）。
 - **G1 已落码并实测通过**：
   - 只读搜索连接器 `research/provider/`：`OfflineSearchProvider`（确定性回放 `recordings/search/fixtures.json`，默认）、`OnlineSearchProvider`（Tavily 风格 REST，GET 只读）、`registry`（online 缺凭据 → 拒绝型 provider，run 返回 422，**不静默回退离线**）。
   - 信号引擎：`collector.ts`（规范化 + 指纹去重，指纹 = sha256(规范化 URL) 截 16）、`scoring.ts`（0–100 确定性打分，类型/来源/新鲜度/关键词四项加权，分项可解释，新鲜度半衰期 30 天、无日期取中性 0.5）。
@@ -70,7 +76,7 @@
 - T-G2-05 回访 watch（WatchPort + LocalWatch 本地桩；真实化 2026-10-27 复核挂账，见「待办」）
 - T-G2-06 外部 CRM 单向同步（已拍板：跳过，用自带 CRM；G4 再评估）
 
-### G3（T-G3-01~06 全部完成；GATE-G3 已过门）
+### G3（T-G3-01~07 全部完成；GATE-G3 已过门，T-G3-07 为追加批次）
 
 - T-G3-01 接入 zeus-client + DecisionPort：`decision/`（`types.ts` DecisionPort 端口 / `zeus.ts` ZeusDecisionAdapter / `registry.ts`）；`GROWTH_ZEUS_MODE=off` 默认无决策后端、offline 端口 fail-closed 503，online 缺凭据 422；zeus-client 不可达/非 2xx 映射 `DECISION_UNAVAILABLE` 503（retryable）。
 - T-G3-02 邮件通道适配器：`mail/`（`types.ts` MailPort + OutboundEmail / `smtp.ts` SmtpMailAdapter（nodemailer，STARTTLS 587 / 隐式 TLS 465）/ `registry.ts`）；`GROWTH_MAIL_MODE=off` 默认无外发、offline 端口 fail-closed 503，smtp 缺 host/from 422；send 失败映射 `MAIL_UNAVAILABLE` 503。
@@ -78,6 +84,7 @@
 - T-G3-04 签核发送流：`outreach/outreach-service.ts`（submit→zeus 分级→approval→mail 发送）+ `003_outreach` 迁移 3 表（campaigns/outreach_drafts/outreach_events）+ `api/outreach-http.ts`（8 路由）；**无 zeus 签核零外发**（send 仅当 approved，decisionId/messageId 全程审计）。
 - T-G3-05 回执跟踪：`004_outreach` 迁移 `suppressed_emails`；退信→suppress（再发送被拦）、回复→lead followup 回流、打开跟踪默认关闭（无 pixel，§14.2）。
 - T-G3-06 端到端 + GATE-G3：真实服务冒烟 7/7（healthz→contact/lead/campaign→draft→submit 503 DECISION_UNAVAILABLE→send 409 CONFLICT→审计仅 created）；**无 zeus 签核零外发**强反证通过；approve→send 全链路 + 审计回放由 `outreach.test.ts` 覆盖。
+- T-G3-07 多语言外联（跨境增量 J4，追加批次）：`src/mail/{templates,reply-translator,unsubscribe-token}.ts` + `009_outreach_locale` 双方言迁移（locale+body_html）+ campaign locale 校验 + `POST /pub/v1/outreach/unsubscribe` + boot 合规门；详见 Current state。
 
 ### G5（T-G5-01~05 全部完成；GATE-G5 已过门）
 
@@ -88,10 +95,10 @@
 - T-G5-05 撮合闭环 + GATE-G5：`match-e2e.test.ts` 需求信号+货源信号→撮合；真实服务冒烟 8/8。
 - 撮合联系（FR-22）：`MatchService.buildIntroduction` 生成撮合介绍 + `contactMatch` 路由到 outreach（撮合实体 email → 自动建 contact/lead/campaign/draft，缺 email 回退 ownerEmail）；`006_contact_email` 迁移加 email 列 + structurer extractEmail；`OutreachService.createContactDraft` 直接指定收件人建草稿。
 
-## 测试覆盖（tests/，19 文件 / 110 用例）
+## 测试覆盖（tests/，24 文件 / 165 用例）
 
-- `outreach-http.test.ts`（6）：回调 secret 未配置 fail-closed 401、缺签/错签/错钥 401 且零副作用、签名退信 suppress + eventId 重放幂等、缺 eventId 400、签名回复回流单条 followup + 重放返回首次结果、未知 messageId 404。
-- `boot.test.ts`（5）：GROWTH_API_TOKEN 缺失/空串拒启、配置正常、姿态行 set/unset 与模式映射。
+- `outreach-http.test.ts`（11）：回调 secret 未配置 fail-closed 401、缺签/错签/错钥 401 且零副作用、签名退信 suppress + eventId 重放幂等、缺 eventId 400、签名回复回流单条 followup + 重放返回首次结果、未知 messageId 404；T-G3-07：campaign locale 合法 201/非法 400、退订端点缺 secret 422、有效 token 幂等 suppress、无效 token 400 零副作用、/pub/v1 无 Bearer 公开。
+- `boot.test.ts`（10）：GROWTH_API_TOKEN 缺失/空串拒启、配置正常、姿态行 set/unset 与模式映射；T-G3-07 assertMailCompliance：off 放行、smtp 缺 identity/baseUrl/secret 各拒启、全配放行。
 - `error-response.test.ts`（3）：GrowthError 原样透传、非 GrowthError 500 泛化体不回显原文、原文只进服务端日志（GET 路径断言）。
 - `secure-compare.test.ts`（4）：相等/同长不等/异长不抛/空串语义。
 - `matcher.test.ts`（7）：五维打分各维度边界、品类 mismatch/general、价格数量越界、同地区 vs 跨境、缺字段中性。
@@ -99,7 +106,10 @@
 - `match.test.ts`（3）：需求/货源/匹配 CRUD。
 - `match-service.test.ts`（5）：校验、幂等匹配、阈值、accept/reject、信号 ingest。
 - `match-e2e.test.ts`（4）：需求信号+货源信号→撮合闭环、介绍渲染、联系路由。
-- `outreach.test.ts`（8）：campaign/草稿创建、无邮箱 lead 跳过、submit→approve→send 审计链、reject、zeus off 零外发强反证、退信 suppress 拦发送、回复回流 followup、未知 messageId 404。
+- `outreach.test.ts`（12）：campaign/草稿创建、无邮箱 lead 跳过、submit→approve→send 审计链、reject、zeus off 零外发强反证、退信 suppress 拦发送、回复回流 followup、未知 messageId 404；T-G3-07：zh locale 草稿（含退订页脚/html）落库往返、默认 en、sendDraft 携带 html、回复 note 含 intent/locale。
+- `templates.test.ts`（6，T-G3-07）：en/zh 渲染、compliance 页脚含 identity+退订链接、无 compliance 省略页脚、html 转义防 XSS、isEmailLocale 枚举。
+- `reply-translator.test.ts`（10，T-G3-07）：detectLocale zh/en/unknown、classifyReplyIntent 五类优先级、OfflineReplyTranslator 保留原文不编造。
+- `unsubscribe-token.test.ts`（5，T-G3-07）：token 往返、篡改 MAC/跨 secret/畸形 token 拒、地址绑定。
 - `mail.test.ts`（5）：off 模式 fail-closed 503、smtp 缺 host/from 422、live 适配器、jsonTransport 发送返回 messageId、send 失败 → MAIL_UNAVAILABLE 503。
 - `decision.test.ts`（6）：off 模式 fail-closed 503、online 缺凭据 422、live 适配器、decide 返回分级、网络失败/非 2xx → DECISION_UNAVAILABLE 503。
 - `scoring.test.ts`（5）：高分上限、低词命中、无日期中性、衰减、区间与分项一致性。
@@ -119,6 +129,7 @@
 - [x] T-G2-06 外部 CRM：跳过（2026-10-25，用 growth-os 自带 CRM，暂不接 HubSpot/表格；G4 运营化再评估）。
 - [x] GATE-G3：已过门（2026-10-25，57 用例 + 真实服务冒烟 7/7 零外发强反证）。
 - [x] G3 邮件触达（T-G3-01~06 全部完成，默认 D2；强制执行设计方案 §14.2 邮件合规）。
+- [x] T-G3-07 跨境增量 J4 多语言外联（2026-11-01 拍板，同日落码并过门；PR #7 合并 main，24 文件 / 165 用例 + 真实启动冒烟）。
 - [x] GATE-G5：已过门（2026-10-25，81 用例 + 真实服务冒烟 7/7 撮合闭环）。
 - [x] G5 撮合引擎（T-G5-01~05 全部完成：数据模型/结构化/匹配/API/闭环）。
 - [ ] G4 运营化（外部依赖：真实云/域名/密钥/合规；含 SPF/DKIM/DMARC 与跨境数据评估）。
