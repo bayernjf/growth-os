@@ -5,6 +5,7 @@ import { serve } from '@hono/node-server';
 import { loadConfig } from './config.js';
 import { createResearchApp } from './api/research-http.js';
 import { createCrmApp } from './api/crm-http.js';
+import { createLeadImportApp } from './api/lead-import-http.js';
 import { CrmRepository } from './crm/repository.js';
 import { LeadService } from './crm/lead-service.js';
 import { LocalWatch } from './crm/watch.js';
@@ -80,6 +81,7 @@ async function main(): Promise<void> {
   const app = new Hono();
   app.route('/', createResearchApp({ service: researchService, apiToken: config.apiToken }));
   app.route('/', createCrmApp({ service: crmService, apiToken: config.apiToken }));
+  app.route('/', createLeadImportApp({ service: crmService, apiToken: config.apiToken }));
   app.route('/', createOutreachApp({ service: outreachService, apiToken: config.apiToken, callbackSecret: config.outreachCallbackSecret }));
   app.route('/', createMatchApp({ service: matchService, apiToken: config.apiToken }));
   app.route('/', createMcpApp({ service: crmService, mcpToken: config.mcpToken }));
