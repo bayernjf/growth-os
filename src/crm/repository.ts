@@ -1,6 +1,6 @@
 // growth-os G2 CRM persistence (dialect-agnostic; JSON serialized at the edge).
 
-import type { StorageDriver } from '../storage/driver.js';
+import type { StorageDriver, StorageTxn } from '../storage/driver.js';
 import type { ScoreBreakdown } from '../research/types.js';
 import { newId } from '../util/hash.js';
 import type {
@@ -30,6 +30,7 @@ interface LeadRow {
   id: string;
   source_type: string;
   source_signal_id: string | null;
+  source_ref: string | null;
   contact_id: string | null;
   title: string;
   summary: string;
@@ -69,9 +70,27 @@ const EMPTY_BREAKDOWN: ScoreBreakdown = { type: 0, source: 0, fresh: 0, keyword:
 export class CrmRepository {
   constructor(private readonly driver: StorageDriver) {}
 
+  /** Run a unit of work across contacts/leads in one transaction (batch import). */
+  transaction<T>(fn: (tx: StorageTxn) => Promise<T>): Promise<T> {
+    return this.driver.transaction(fn);
+  }
+
   // ---------- contacts ----------
 
   async createContact(input: ContactInput, now?: string): Promise<Contact> {
+    return this.insertContact(this.driver, input, now);
+  }
+
+  /** Insert a contact on an explicit transaction (used by batch import). */
+  createContactOnTx(tx: StorageTxn, input: ContactInput, now?: string): Promise<Contact> {
+    return this.insertContact(tx, input, now);
+  }
+
+  private async insertContact(
+    runner: StorageTxn,
+    input: ContactInput,
+    now?: string,
+  ): Promise<Contact> {
     const ts = now ?? new Date().toISOString();
     const contact: Contact = {
       id: newId('contact'),
@@ -84,7 +103,7 @@ export class CrmRepository {
       createdAt: ts,
       updatedAt: ts,
     };
-    await this.driver.run(
+    await runner.run(
       `INSERT INTO contacts
         (id,name,company,email,title,source_type,source_refs,created_at,updated_at)
        VALUES (?,?,?,?,?,?,?,?,?)`,
@@ -132,11 +151,25 @@ export class CrmRepository {
   // ---------- leads ----------
 
   async createLead(input: LeadInput, now?: string): Promise<Lead> {
+    return this.insertLead(this.driver, input, now);
+  }
+
+  /** Insert a lead on an explicit transaction (used by batch import). */
+  createLeadOnTx(tx: StorageTxn, input: LeadInput, now?: string): Promise<Lead> {
+    return this.insertLead(tx, input, now);
+  }
+
+  private async insertLead(
+    runner: StorageTxn,
+    input: LeadInput,
+    now?: string,
+  ): Promise<Lead> {
     const ts = now ?? new Date().toISOString();
     const lead: Lead = {
       id: newId('lead'),
       sourceType: input.sourceType ?? 'manual',
       ...(input.sourceSignalId ? { sourceSignalId: input.sourceSignalId } : {}),
+      ...(input.sourceRef ? { sourceRef: input.sourceRef } : {}),
       ...(input.contactId ? { contactId: input.contactId } : {}),
       title: input.title,
       summary: input.summary ?? '',
@@ -146,14 +179,15 @@ export class CrmRepository {
       createdAt: ts,
       updatedAt: ts,
     };
-    await this.driver.run(
+    await runner.run(
       `INSERT INTO leads
-        (id,source_type,source_signal_id,contact_id,title,summary,score,score_breakdown,status,created_at,updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+        (id,source_type,source_signal_id,source_ref,contact_id,title,summary,score,score_breakdown,status,created_at,updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         lead.id,
         lead.sourceType,
         lead.sourceSignalId ?? null,
+        lead.sourceRef ?? null,
         lead.contactId ?? null,
         lead.title,
         lead.summary,
@@ -241,6 +275,7 @@ export class CrmRepository {
       id: row.id,
       sourceType: row.source_type as Lead['sourceType'],
       ...(row.source_signal_id ? { sourceSignalId: row.source_signal_id } : {}),
+      ...(row.source_ref ? { sourceRef: row.source_ref } : {}),
       ...(row.contact_id ? { contactId: row.contact_id } : {}),
       title: row.title,
       summary: row.summary,
