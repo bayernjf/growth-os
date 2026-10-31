@@ -3,7 +3,7 @@
 import type { ScoreBreakdown } from '../research/types.js';
 
 export type LeadStatus = 'new' | 'qualified' | 'contacted' | 'won' | 'lost';
-export type LeadSourceType = 'signal' | 'form' | 'order' | 'manual';
+export type LeadSourceType = 'signal' | 'form' | 'order' | 'manual' | 'import';
 
 export const LEAD_STATUSES: readonly LeadStatus[] = [
   'new',
@@ -17,6 +17,7 @@ export const LEAD_SOURCE_TYPES: readonly LeadSourceType[] = [
   'form',
   'order',
   'manual',
+  'import',
 ];
 
 /** Valid state-machine transitions; anything else fails closed (409). */
@@ -53,6 +54,7 @@ export interface Lead {
   id: string;
   sourceType: LeadSourceType;
   sourceSignalId?: string;
+  sourceRef?: string;
   contactId?: string;
   title: string;
   summary: string;
@@ -66,11 +68,27 @@ export interface Lead {
 export interface LeadInput {
   sourceType?: LeadSourceType;
   sourceSignalId?: string;
+  sourceRef?: string;
   contactId?: string;
   title: string;
   summary?: string;
   score?: number;
   scoreBreakdown?: ScoreBreakdown;
+}
+
+/**
+ * One record arriving through a generic import intake (webhook/CSV/manual).
+ * sourceRef is mandatory: it carries the external import origin used for
+ * traceability after the lead enters the shared state machine.
+ */
+export interface ImportedLeadInput {
+  sourceRef: string;
+  title: string;
+  summary?: string;
+  contactName?: string;
+  contactEmail?: string;
+  company?: string;
+  score?: number;
 }
 
 export interface LeadFollowup {
