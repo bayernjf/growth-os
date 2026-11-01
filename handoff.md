@@ -2,9 +2,16 @@
 
 > 状态主入口。开工前先读；每完成一个工作单元立即更新（已完成划掉、待办保留）。
 
-## Current state（2026-11-01，跨境增量 T-G3-07 多语言外联已落码并过门）
+## Current state（2026-11-01，对外运营 M1 销售闭环 OP-10~14/18 已落码，待 PR）
 
-- **T-G3-07 多语言外联（跨境增量 J4，2026-11-01）已落码并过门**（PR #7 合并 main，分支 feature/outreach-multilingual）：
+- **M1 销售-交付闭环本地核心（OP-10~14、OP-18，分支 feature/sales-m1，未推送）**：
+  - 迁移（双方言，check-migrations 11 对）：`010_sales_quotes`（quotes 行项 JSON/整数分金额/状态 draft→sent→accepted|rejected + quote_events 审计）、`011_sales_contracts_orders`（contracts draft→sent→signed；orders quote→order，delivery_status 预留 OP-15、invoice_ref 预留 OP-16）。
+  - `src/sales/`：types（行项/状态机）、repository（双方言 mapRow、状态转换+审计事件同事务、order_no）、sales-service（金额校验：qty 正整数/单价非负/单一币种/总额由行项求和；跨实体门槛——未 accepted 不能建 contract、未 signed 不能建 order；OP-18 createQuoteFromLead）。
+  - **zeus 分级（OP-13）**：`SalesDecisionGate`，报价 ≥ `GROWTH_QUOTE_APPROVAL_THRESHOLD_CENTS`（默认 500000=5000.00）走 zeus；低金额零外发 D0 自动；高金额 zeus 不可用即抛 503 fail-closed（RejectingDecisionPort），D2 时 quote 留 draft 挂 decisionId（202 pendingApproval），resolve-approval 见终态再发。
+  - HTTP：`/api/v1/sales/{quotes,contracts,orders}` + send/accept/reject/resolve-approval/sign 动作（src/api/sales-http.ts，Bearer 复用 crm-http），serve.ts 装配。
+  - 验证：sales-service 10 例（金额非法、状态机、跨实体门槛、D2 挂起/解决、fail-closed 零外发、lead 转换）+ sales-http 3 例（401/400/409/全链）；全量 **26 文件/178 用例**（+13）五门全绿；守卫回退实测变红。**OP-15/16 跨 agent-dev/agent-world、OP-17 全链 e2e 未做**。
+
+- **T-G3-07 多语言外联（2026-11-01）已过门**（PR #7 合并 main）：
   - **多语言模板**：src/mail/templates.ts（renderEmailTemplate en/zh，默认 en 按设计 §14.3.3）输出 subject/text/html 三态；html 部分对收件人/线索内容 escapeHtml 防注入；无 compliance 时省略页脚。
   - **回复理解翻译**：src/mail/reply-translator.ts（detectLocale / classifyReplyIntent：unsubscribe 优先、auto/question/interest/other / OfflineReplyTranslator 离线不编造翻译、保留原文，接口兼容在线实现）；recordReply note 追加 intent/locale 标注（PII 不落日志，§14.1.2）。
   - **退订合规闭环（§14.2.1）**：src/mail/unsubscribe-token.ts（HMAC-SHA256 绑定邮箱的退订 token，常量时间校验、地址绑定）；公开端点 POST /pub/v1/outreach/unsubscribe（无 Bearer；缺 secret fail-closed 422；token 无效 400）；complianceFactory 注入 DraftWriter，每封外发邮件页脚含身份标识加退订链接；assertMailCompliance boot 门——smtp 模式缺 GROWTH_MAIL_IDENTITY / GROWTH_MAIL_UNSUBSCRIBE_BASE_URL / GROWTH_MAIL_UNSUBSCRIBE_SECRET 任一即拒启。
