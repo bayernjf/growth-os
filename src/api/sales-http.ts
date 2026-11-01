@@ -100,6 +100,25 @@ export function createSalesApp(deps: SalesAppDeps): Hono {
   });
   app.get('/api/v1/sales/orders', async (c) => c.json(await deps.service.listOrders()));
   app.get('/api/v1/sales/orders/:id', async (c) => c.json(await deps.service.getOrder(c.req.param('id'))));
+  app.get('/api/v1/sales/orders/:id/events', async (c) =>
+    c.json(await deps.service.listOrderEvents(c.req.param('id'))),
+  );
+  app.post('/api/v1/sales/orders/:id/deliver', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { note?: string };
+    return c.json(await deps.service.markDelivered(c.req.param('id'), body.note ?? ''));
+  });
+  app.post('/api/v1/sales/orders/:id/verify', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { note?: string };
+    return c.json(await deps.service.markVerified(c.req.param('id'), body.note ?? ''));
+  });
+  app.post('/api/v1/sales/orders/:id/invoice', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { externalRef?: string };
+    const invoice = await deps.service.issueInvoice(c.req.param('id'), body.externalRef);
+    return c.json(invoice, 201);
+  });
+  app.get('/api/v1/sales/orders/:id/invoice', async (c) =>
+    c.json((await deps.service.getInvoiceForOrder(c.req.param('id'))) ?? null),
+  );
 
   return app;
 }

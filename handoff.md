@@ -164,3 +164,22 @@
 - 与 `commerce-os` 同构：存储层（driver/sqlite/postgres/migrate）、tsconfig/eslint/vitest、check-migrations、CI 结构一致；G1/G2 均不含 zeus-client。
 - 实现相对设计文档的一处精简：signals 未存 `raw` 原始响应列（G1 fixtures 已结构化），接真实源时如需原始快照再加迁移列；设计文档已对齐。
 - G2 watch 为本地桩（`WatchPort`）；2026-10-27 复核挂账：zeus watch 触发面虽已就绪，但读数源读不到 growth-os followup（metrics/realm 元数据/connector 握手均不通），真实化前置缺口与落码形状见「待办」T-G2-05；外部 CRM 同步（T-G2-06）写回经 D1/D2，待拍板。
+
+## 对外运营 M1 销售闭环 · OP-15/16/17（2026-11-01，分支 feature/sales-m1-fulfillment）
+
+- 背景：OP-10~14、18 已在 main（PR #8）。核实后 OP-15/16 改为 growth-os 本地闭环
+  （agent-dev 无订单交付端点、agent-world invoice 是其自身 SaaS 订阅计费，均不适用）。
+- 迁移 **012_order_fulfillment_invoices**（sqlite+postgres 配对，check-migrations 12 对）：
+  `order_events`（delivery/invoice 审计）+ `invoices`（order_id 唯一，open/paid/void，external_ref 预留外部账单）。
+- OP-15 履约：delivery_status 状态机 pending→delivered→verified（verified 终态，不回退），
+  service `markDelivered/markVerified` + repository 事务（状态与事件同写）；HTTP
+  `POST /api/v1/sales/orders/:id/deliver|verify`、GET …/events。
+- OP-16 发票：`issueInvoice(orderId)` 金额/币种服务端取自订单（客户端无法传金额），
+  一单一票幂等，同事务写 orders.invoice_ref 并记 invoice 事件；不接 Stripe/网关。
+  HTTP `POST|GET /api/v1/sales/orders/:id/invoice`。
+- OP-17 GATE-W2：tests/sales-e2e.test.ts 全链（lead→quote D2 审批→contract→order→
+  delivered→verified→invoice）+ 失败路径（未交付不能 verified、终态不回退、一票幂等、
+  未签合同不能下单）；sales-http 补 2 个契约用例。零真实网络（fake DecisionPort）。
+- 验证：Node 22 五门全绿；测试 178→**185**（+7）。守卫变红实证：markVerified 放宽到
+  pending 即 e2e 失败；invoice 金额改 0 即金额一致性用例失败；均已恢复。
+- 未做（跨系统真实对接）：invoice external_ref 未来接外部账单；delivery 暂为本地登记。
