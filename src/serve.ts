@@ -30,6 +30,10 @@ import { createMatchApp } from './api/match-http.js';
 import { MatchRepository } from './match/repository.js';
 import { MatchService } from './match/match-service.js';
 import { createMcpApp } from './api/mcp-http.js';
+import { SalesRepository } from './sales/repository.js';
+import { SalesService, type LeadCustomerLookup } from './sales/sales-service.js';
+import { SalesDecisionGate } from './sales/decision.js';
+import { createSalesApp } from './api/sales-http.js';
 import { assertFailClosedBoot, assertMailCompliance, authPosture } from './util/boot.js';
 
 async function createDriver(): Promise<StorageDriver> {
@@ -110,12 +114,32 @@ async function main(): Promise<void> {
   const matchRepo = new MatchRepository(driver);
   const matchService = new MatchService({ repo: matchRepo, outreach: outreachService });
 
+  const decisionPort = createDecisionPort(config);
+  const salesRepo = new SalesRepository(driver);
+  const leadLookup: LeadCustomerLookup = {
+    async getLeadCustomer(leadId) {
+      const lead = await crmRepo.getLead(leadId);
+      if (!lead) return undefined;
+      const contact = lead.contactId ? await crmRepo.getContact(lead.contactId) : undefined;
+      return {
+        name: contact?.name ?? lead.title,
+        email: contact?.email ?? '',
+      };
+    },
+  };
+  const salesService = new SalesService({
+    repo: salesRepo,
+    gate: new SalesDecisionGate({ decision: decisionPort, thresholdCents: config.quoteApprovalThresholdCents }),
+    leads: leadLookup,
+  });
+
   const app = new Hono();
   app.route('/', createResearchApp({ service: researchService, apiToken: config.apiToken }));
   app.route('/', createCrmApp({ service: crmService, apiToken: config.apiToken }));
   app.route('/', createLeadImportApp({ service: crmService, apiToken: config.apiToken }));
   app.route('/', createOutreachApp({ service: outreachService, apiToken: config.apiToken, callbackSecret: config.outreachCallbackSecret, unsubscribeSecret: config.mailUnsubscribeSecret }));
   app.route('/', createMatchApp({ service: matchService, apiToken: config.apiToken }));
+  app.route('/', createSalesApp({ service: salesService, apiToken: config.apiToken }));
   app.route('/', createMcpApp({ service: crmService, mcpToken: config.mcpToken }));
 
   serve({ fetch: app.fetch, hostname: config.host, port: config.port }, () => {
