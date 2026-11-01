@@ -9,8 +9,10 @@ import type { SalesDecisionGate } from './decision.js';
 import { SalesRepository } from './repository.js';
 import {
   CONTRACT_TRANSITIONS,
+  DELIVERY_TRANSITIONS,
   QUOTE_TRANSITIONS,
   type Contract,
+  type Invoice,
   type Order,
   type Quote,
   type QuoteInput,
@@ -239,6 +241,57 @@ export class SalesService {
     return this.repo.listOrders();
   }
 
+  // ---------- fulfillment (OP-15) ----------
+
+  async markDelivered(orderId: string, note = ''): Promise<Order> {
+    await this.mustTransitionDelivery(orderId, 'pending', 'delivered');
+    await this.repo.transitionOrderDelivery({
+      id: orderId,
+      toStatus: 'delivered',
+      note,
+      stampColumn: 'delivered_at',
+      now: this.now(),
+    });
+    return this.getOrder(orderId);
+  }
+
+  async markVerified(orderId: string, note = ''): Promise<Order> {
+    await this.mustTransitionDelivery(orderId, 'delivered', 'verified');
+    await this.repo.transitionOrderDelivery({
+      id: orderId,
+      toStatus: 'verified',
+      note,
+      stampColumn: 'verified_at',
+      now: this.now(),
+    });
+    return this.getOrder(orderId);
+  }
+
+  listOrderEvents(orderId: string) {
+    return this.repo.listOrderEvents(orderId);
+  }
+
+  // ---------- invoices (OP-16) ----------
+
+  /**
+   * Issue the single local invoice for an order. Amount/currency are copied
+   * from the persisted order server-side; a client cannot set them. Issuing
+   * twice returns the existing invoice (idempotent).
+   */
+  async issueInvoice(orderId: string, externalRef?: string): Promise<Invoice> {
+    const order = await this.getOrder(orderId);
+    return this.repo.issueInvoiceForOrder({
+      order,
+      ...(externalRef?.trim() ? { externalRef: externalRef.trim() } : {}),
+      now: this.now(),
+    });
+  }
+
+  async getInvoiceForOrder(orderId: string): Promise<Invoice | undefined> {
+    await this.getOrder(orderId);
+    return this.repo.getInvoiceForOrder(orderId);
+  }
+
   // ---------- internals ----------
 
   private normalizeItems(raw: QuoteInput['lineItems']): QuoteLineItem[] {
@@ -284,5 +337,20 @@ export class SalesService {
       throw Errors.invalidTransition(`illegal contract transition ${contract.status} -> ${to}`);
     }
     return contract;
+  }
+
+  private async mustTransitionDelivery(
+    id: string,
+    from: Order['deliveryStatus'],
+    to: Order['deliveryStatus'],
+  ): Promise<Order> {
+    const order = await this.getOrder(id);
+    if (order.deliveryStatus !== from) {
+      throw Errors.invalidTransition(`cannot move order delivery from ${order.deliveryStatus} to ${to}`);
+    }
+    if (!DELIVERY_TRANSITIONS[order.deliveryStatus].includes(to)) {
+      throw Errors.invalidTransition(`illegal delivery transition ${order.deliveryStatus} -> ${to}`);
+    }
+    return order;
   }
 }

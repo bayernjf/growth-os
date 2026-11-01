@@ -5,6 +5,8 @@
 export type QuoteStatus = 'draft' | 'sent' | 'accepted' | 'rejected';
 export type ContractStatus = 'draft' | 'sent' | 'signed';
 export type DeliveryStatus = 'pending' | 'delivered' | 'verified';
+export type InvoiceStatus = 'open' | 'paid' | 'void';
+export type OrderEventKind = 'delivery' | 'invoice';
 
 export interface QuoteLineItem {
   description: string;
@@ -83,6 +85,28 @@ export interface Order {
   updatedAt: string;
 }
 
+export interface OrderEvent {
+  id: string;
+  orderId: string;
+  fromStatus: DeliveryStatus;
+  toStatus: DeliveryStatus;
+  kind: OrderEventKind;
+  note: string;
+  createdAt: string;
+}
+
+export interface Invoice {
+  id: string;
+  orderId: string;
+  amountCents: number;
+  currency: string;
+  status: InvoiceStatus;
+  externalRef?: string;
+  issuedAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /** Legal status transitions for a quote. */
 export const QUOTE_TRANSITIONS: Record<QuoteStatus, QuoteStatus[]> = {
   draft: ['sent'],
@@ -96,4 +120,11 @@ export const CONTRACT_TRANSITIONS: Record<ContractStatus, ContractStatus[]> = {
   draft: ['sent'],
   sent: ['signed'],
   signed: [],
+};
+
+/** Legal delivery transitions. verified is terminal; no rollback. */
+export const DELIVERY_TRANSITIONS: Record<DeliveryStatus, DeliveryStatus[]> = {
+  pending: ['delivered'],
+  delivered: ['verified'],
+  verified: [],
 };

@@ -7,7 +7,9 @@ import { newId } from '../util/hash.js';
 import type {
   Contract,
   ContractStatus,
+  Invoice,
   Order,
+  OrderEvent,
   Quote,
   QuoteEvent,
   QuoteLineItem,
@@ -67,6 +69,28 @@ interface OrderRow {
   note: string;
   delivered_at: string | null;
   verified_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface OrderEventRow {
+  id: string;
+  order_id: string;
+  from_status: string;
+  to_status: string;
+  kind: string;
+  note: string;
+  created_at: string;
+}
+
+interface InvoiceRow {
+  id: string;
+  order_id: string;
+  amount_cents: number;
+  currency: string;
+  status: string;
+  external_ref: string | null;
+  issued_at: string;
   created_at: string;
   updated_at: string;
 }
@@ -317,6 +341,123 @@ export class SalesRepository {
     return row?.c ?? 0;
   }
 
+  // ---------- order fulfillment (OP-15) ----------
+
+  /**
+   * Advance an order's delivery status and append the event atomically.
+   * Returns 0 when the order is missing, preserving update-count semantics.
+   */
+  async transitionOrderDelivery(input: {
+    id: string;
+    toStatus: Order['deliveryStatus'];
+    note: string;
+    stampColumn?: 'delivered_at' | 'verified_at';
+    now: string;
+  }): Promise<{ changes: number; fromStatus?: Order['deliveryStatus'] }> {
+    return this.driver.transaction(async (tx) => {
+      const row = await tx.get<OrderRow>('SELECT * FROM orders WHERE id = ?', [input.id]);
+      if (!row) return { changes: 0 };
+      const fromStatus = row.delivery_status as Order['deliveryStatus'];
+      const stamp = input.stampColumn ? `, ${input.stampColumn} = ?` : '';
+      const params: unknown[] = [input.toStatus];
+      if (input.stampColumn) params.push(input.now);
+      params.push(input.note, input.now, input.id);
+      const result = await tx.run(
+        `UPDATE orders SET delivery_status = ?${stamp}, note = ?, updated_at = ? WHERE id = ?`,
+        params,
+      );
+      await tx.run(
+        `INSERT INTO order_events (id,order_id,from_status,to_status,kind,note,created_at)
+         VALUES (?,?,?,?, 'delivery', ?,?)`,
+        [newId('oev'), input.id, fromStatus, input.toStatus, input.note, input.now],
+      );
+      return { changes: result.changes, fromStatus };
+    });
+  }
+
+  async listOrderEvents(orderId: string): Promise<OrderEvent[]> {
+    const rows = await this.driver.all<OrderEventRow>(
+      'SELECT * FROM order_events WHERE order_id = ? ORDER BY created_at ASC',
+      [orderId],
+    );
+    return rows.map((r) => ({
+      id: r.id,
+      orderId: r.order_id,
+      fromStatus: r.from_status as OrderEvent['fromStatus'],
+      toStatus: r.to_status as OrderEvent['toStatus'],
+      kind: r.kind as OrderEvent['kind'],
+      note: r.note,
+      createdAt: r.created_at,
+    }));
+  }
+
+  // ---------- invoices (OP-16) ----------
+
+  async getInvoiceForOrder(orderId: string): Promise<Invoice | undefined> {
+    const row = await this.driver.get<InvoiceRow>('SELECT * FROM invoices WHERE order_id = ?', [orderId]);
+    return row ? this.mapInvoice(row) : undefined;
+  }
+
+  /**
+   * Create the invoice from the order's own money fields and link it back in
+   * one transaction. Money is server-derived (the caller passes the order);
+   * client-supplied amounts never reach this method.
+   */
+  async issueInvoiceForOrder(input: {
+    order: Order;
+    externalRef?: string;
+    now: string;
+  }): Promise<Invoice> {
+    return this.driver.transaction(async (tx) => {
+      const existing = await tx.get<InvoiceRow>('SELECT * FROM invoices WHERE order_id = ?', [input.order.id]);
+      if (existing) return this.mapInvoice(existing);
+      const invoice: Invoice = {
+        id: newId('inv'),
+        orderId: input.order.id,
+        amountCents: input.order.amountCents,
+        currency: input.order.currency,
+        status: 'open',
+        ...(input.externalRef ? { externalRef: input.externalRef } : {}),
+        issuedAt: input.now,
+        createdAt: input.now,
+        updatedAt: input.now,
+      };
+      await tx.run(
+        `INSERT INTO invoices
+          (id,order_id,amount_cents,currency,status,external_ref,issued_at,created_at,updated_at)
+         VALUES (?,?,?,?,'open',?,?,?,?)`,
+        [
+          invoice.id,
+          invoice.orderId,
+          invoice.amountCents,
+          invoice.currency,
+          invoice.externalRef ?? null,
+          invoice.issuedAt,
+          invoice.createdAt,
+          invoice.updatedAt,
+        ],
+      );
+      await tx.run('UPDATE orders SET invoice_ref = ?, updated_at = ? WHERE id = ?', [
+        invoice.id,
+        input.now,
+        input.order.id,
+      ]);
+      await tx.run(
+        `INSERT INTO order_events (id,order_id,from_status,to_status,kind,note,created_at)
+         VALUES (?,?,?,?, 'invoice', ?,?)`,
+        [
+          newId('oev'),
+          input.order.id,
+          input.order.deliveryStatus,
+          input.order.deliveryStatus,
+          `invoice ${invoice.id} issued`,
+          input.now,
+        ],
+      );
+      return invoice;
+    });
+  }
+
   // ---------- mappers ----------
 
   private mapQuote(r: QuoteRow): Quote {
@@ -374,6 +515,20 @@ export class SalesRepository {
       note: r.note,
       ...(r.delivered_at ? { deliveredAt: r.delivered_at } : {}),
       ...(r.verified_at ? { verifiedAt: r.verified_at } : {}),
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    };
+  }
+
+  private mapInvoice(r: InvoiceRow): Invoice {
+    return {
+      id: r.id,
+      orderId: r.order_id,
+      amountCents: Number(r.amount_cents),
+      currency: r.currency,
+      status: r.status as Invoice['status'],
+      ...(r.external_ref ? { externalRef: r.external_ref } : {}),
+      issuedAt: r.issued_at,
       createdAt: r.created_at,
       updatedAt: r.updated_at,
     };
