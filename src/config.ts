@@ -34,6 +34,8 @@ export interface AppConfig {
   /** HMAC secret for one-click unsubscribe tokens (kept separate from callback signing). */
   mailUnsubscribeSecret?: string | undefined;
   leadMinScore: number;
+  /** Quotes at/above this amount (integer cents) require a zeus D2 approval. */
+  quoteApprovalThresholdCents: number;
   mcpToken?: string | undefined;
   outreachCallbackSecret?: string | undefined;
   scoring: ScoringConfig;
@@ -73,6 +75,8 @@ export function loadConfig(): AppConfig {
     mailUnsubscribeBaseUrl: process.env.GROWTH_MAIL_UNSUBSCRIBE_BASE_URL || undefined,
     mailUnsubscribeSecret: process.env.GROWTH_MAIL_UNSUBSCRIBE_SECRET || undefined,
     leadMinScore: num('LEAD_MIN_SCORE', 60),
+    // Default D2 gate at 5,000.00 (major currency units); override per deploy.
+    quoteApprovalThresholdCents: num('GROWTH_QUOTE_APPROVAL_THRESHOLD_CENTS', 500_000),
     mcpToken: process.env.GROWTH_MCP_TOKEN || undefined,
     outreachCallbackSecret: process.env.GROWTH_OUTREACH_CALLBACK_SECRET || undefined,
     scoring: {
