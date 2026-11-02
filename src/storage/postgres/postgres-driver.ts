@@ -1,27 +1,42 @@
 import type { StorageDriver, StorageTxn } from '../driver.js';
 
 /**
+ * Minimal structural surface of a `pg` pool client (the `pg` package is an
+ * optional dependency that is NOT installed in local CI, so its types are
+ * intentionally absent here).
+ */
+export interface PgClientLike {
+  query: (sql: string, params?: unknown[]) => Promise<{ rows: unknown[]; rowCount: number }>;
+  release: () => void;
+}
+
+/** Minimal structural surface of `pg.Pool` used by this driver. */
+export interface PgPoolLike {
+  connect: () => Promise<PgClientLike>;
+  query: PgClientLike['query'];
+  end: () => Promise<void>;
+}
+
+/**
  * Postgres driver for production. The `pg` package is an optional
  * dependency that is NOT installed in local CI: constructing this driver
  * without it fails closed with an actionable error instead of silently
  * falling back to another dialect.
  *
  * Business SQL uses `?` placeholders; this driver converts them to `$1..$n`.
+ *
+ * Transactions (2026-11-02 review P1-2): every transaction checks out its OWN
+ * connection from the pool and releases it in `finally`. The previous
+ * single-client driver interleaved BEGIN/COMMIT across concurrent requests,
+ * letting one request's ROLLBACK abort another's in-flight work.
  */
 export class PostgresDriver implements StorageDriver {
   readonly dialect = 'postgres' as const;
-  // Minimal structural surface of pg.Client used here.
-  private readonly client: {
-    query: (sql: string, params?: unknown[]) => Promise<{ rows: unknown[]; rowCount: number }>;
-    end: () => Promise<void>;
-  };
 
-  private constructor(client: PostgresDriver['client']) {
-    this.client = client;
-  }
+  private constructor(private readonly pool: PgPoolLike) {}
 
   static async connect(connectionString: string): Promise<PostgresDriver> {
-    let pg: { Client: new (config: { connectionString: string }) => PostgresDriver['client'] };
+    let pg: { Pool: new (config: { connectionString: string }) => PgPoolLike };
     try {
       // `pg` is an optional production dependency that is not installed in
       // local CI; its types are intentionally absent here.
@@ -32,9 +47,18 @@ export class PostgresDriver implements StorageDriver {
         'Postgres driver requested but the optional `pg` dependency is not installed. Run `npm install pg` in the production environment.',
       );
     }
-    const client = new pg.Client({ connectionString });
-    await client.query('SELECT 1');
-    return new PostgresDriver(client);
+    const pool = new pg.Pool({ connectionString });
+    await pool.query('SELECT 1');
+    return new PostgresDriver(pool);
+  }
+
+  /**
+   * Composition seam: build a driver over an existing pool. Used by
+   * `connect()` in production and by tests with an instrumented fake pool
+   * (the optional `pg` package is absent in CI).
+   */
+  static fromPool(pool: PgPoolLike): PostgresDriver {
+    return new PostgresDriver(pool);
   }
 
   private static toDollarParams(sql: string): { text: string; count: number } {
@@ -45,7 +69,7 @@ export class PostgresDriver implements StorageDriver {
 
   async all<T>(sql: string, params: readonly unknown[] = []): Promise<T[]> {
     const { text } = PostgresDriver.toDollarParams(sql);
-    const result = await this.client.query(text, [...params]);
+    const result = await this.pool.query(text, [...params]);
     return result.rows as T[];
   }
 
@@ -56,45 +80,50 @@ export class PostgresDriver implements StorageDriver {
 
   async run(sql: string, params: readonly unknown[] = []): Promise<{ changes: number }> {
     const { text } = PostgresDriver.toDollarParams(sql);
-    const result = await this.client.query(text, [...params]);
+    const result = await this.pool.query(text, [...params]);
     return { changes: result.rowCount };
   }
 
   async exec(sql: string): Promise<void> {
-    await this.client.query(sql);
+    await this.pool.query(sql);
   }
 
   async transaction<T>(fn: (tx: StorageTxn) => Promise<T>): Promise<T> {
     const { toDollarParams } = PostgresDriver;
+    // Dedicated connection per transaction: its BEGIN/COMMIT/ROLLBACK can
+    // never interleave with another request's transaction on the same wire.
+    const client = await this.pool.connect();
     const txn: StorageTxn = {
       all: async (sql, params = []) => {
         const { text } = toDollarParams(sql);
-        const result = await this.client.query(text, [...params]);
+        const result = await client.query(text, [...params]);
         return result.rows as never;
       },
       get: async (sql, params = []) => {
         const { text } = toDollarParams(sql);
-        const result = await this.client.query(text, [...params]);
+        const result = await client.query(text, [...params]);
         return result.rows[0] as never;
       },
       run: async (sql, params = []) => {
         const { text } = toDollarParams(sql);
-        const result = await this.client.query(text, [...params]);
+        const result = await client.query(text, [...params]);
         return { changes: result.rowCount };
       },
     };
-    await this.client.query('BEGIN');
     try {
+      await client.query('BEGIN');
       const result = await fn(txn);
-      await this.client.query('COMMIT');
+      await client.query('COMMIT');
       return result;
     } catch (error) {
-      await this.client.query('ROLLBACK');
+      await client.query('ROLLBACK');
       throw error;
+    } finally {
+      client.release();
     }
   }
 
   async close(): Promise<void> {
-    await this.client.end();
+    await this.pool.end();
   }
 }
