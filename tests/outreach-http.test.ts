@@ -13,12 +13,27 @@ import { migrateUp } from '../src/storage/migrate.js';
 import { SqliteDriver } from '../src/storage/sqlite/sqlite-driver.js';
 
 const SECRET = 'callback-secret';
+const BOUNCE_URL = '/pub/v1/outreach/receipts/bounce';
+const REPLY_URL = '/pub/v1/outreach/receipts/reply';
 
-function sign(body: string): string {
-  return `v1=${createHmac('sha256', SECRET).update(body, 'utf8').digest('hex')}`;
+function nowSeconds(): string {
+  return String(Math.floor(Date.now() / 1000));
 }
 
-async function buildApp(options?: { callbackSecret?: string; unsubscribeSecret?: string }) {
+/** Signature v2: HMAC over "<unixSeconds>.<rawBody>" (2026-11-02 review P1-1). */
+function sign(body: string, timestamp: string, secret: string = SECRET): string {
+  return `v1=${createHmac('sha256', secret).update(`${timestamp}.${body}`, 'utf8').digest('hex')}`;
+}
+
+function signedHeaders(body: string, timestamp: string = nowSeconds()): Record<string, string> {
+  return {
+    'Content-Type': 'application/json',
+    'X-Growth-Timestamp': timestamp,
+    'X-Growth-Signature': sign(body, timestamp),
+  };
+}
+
+async function buildApp(options?: { apiToken?: string; callbackSecret?: string; unsubscribeSecret?: string }) {
   const driver = new SqliteDriver(':memory:');
   await migrateUp(driver);
   const crmRepo = new CrmRepository(driver);
@@ -35,6 +50,7 @@ async function buildApp(options?: { callbackSecret?: string; unsubscribeSecret?:
     '/',
     createOutreachApp({
       service,
+      ...(options?.apiToken ? { apiToken: options.apiToken } : {}),
       ...(options?.callbackSecret ? { callbackSecret: options.callbackSecret } : {}),
       ...(options?.unsubscribeSecret ? { unsubscribeSecret: options.unsubscribeSecret } : {}),
     }),
@@ -42,13 +58,41 @@ async function buildApp(options?: { callbackSecret?: string; unsubscribeSecret?:
   return { app, crmRepo, outreachRepo, service };
 }
 
-describe('signed receipt callbacks (Tier0 review P1)', () => {
+describe('signed receipt callbacks (2026-11-02 review P1-1)', () => {
+  it('accepts a signed callback without a Bearer token in production posture', async () => {
+    // The exact production combination from the review: apiToken is set (so
+    // the /api/v1 Bearer guard is active) and the ESP webhook carries only
+    // its signature. The old code returned 401 here.
+    const { app, outreachRepo } = await buildApp({ apiToken: 'main-token', callbackSecret: SECRET });
+    const guarded = await app.request('/api/v1/outreach/campaigns', { method: 'GET' });
+    expect(guarded.status).toBe(401);
+
+    const body = JSON.stringify({ eventId: 'evt_p1', email: 'jane@acme.com' });
+    const res = await app.request(BOUNCE_URL, { method: 'POST', headers: signedHeaders(body), body });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(await outreachRepo.listSuppressed()).toEqual([
+      { email: 'jane@acme.com', reason: 'bounce', createdAt: expect.any(String) },
+    ]);
+  });
+
+  it('no longer serves the callbacks under the Bearer-guarded /api/v1 prefix', async () => {
+    const { app } = await buildApp({ apiToken: 'main-token', callbackSecret: SECRET });
+    const body = JSON.stringify({ eventId: 'evt_gone', email: 'jane@acme.com' });
+    const res = await app.request('/api/v1/outreach/receipts/bounce', {
+      method: 'POST',
+      headers: { ...signedHeaders(body), Authorization: 'Bearer main-token' },
+      body,
+    });
+    expect(res.status).toBe(404);
+  });
+
   it('fails closed when no callback secret is configured', async () => {
     const { app, outreachRepo } = await buildApp();
     const body = JSON.stringify({ eventId: 'evt_1', email: 'jane@acme.com' });
-    const res = await app.request('/api/v1/outreach/receipts/bounce', {
+    const res = await app.request(BOUNCE_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Growth-Signature': sign(body) },
+      headers: signedHeaders(body),
       body,
     });
     expect(res.status).toBe(401);
@@ -58,23 +102,25 @@ describe('signed receipt callbacks (Tier0 review P1)', () => {
   it('rejects a bounce without a valid signature', async () => {
     const { app, outreachRepo } = await buildApp({ callbackSecret: SECRET });
     const body = JSON.stringify({ eventId: 'evt_1', email: 'jane@acme.com' });
-    const noSig = await app.request('/api/v1/outreach/receipts/bounce', {
+    const ts = nowSeconds();
+    const noSig = await app.request(BOUNCE_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Growth-Timestamp': ts },
       body,
     });
     expect(noSig.status).toBe(401);
-    const badSig = await app.request('/api/v1/outreach/receipts/bounce', {
+    const badSig = await app.request(BOUNCE_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Growth-Signature': 'v1=deadbeef' },
+      headers: { 'Content-Type': 'application/json', 'X-Growth-Timestamp': ts, 'X-Growth-Signature': 'v1=deadbeef' },
       body,
     });
     expect(badSig.status).toBe(401);
-    const wrongKey = await app.request('/api/v1/outreach/receipts/bounce', {
+    const wrongKey = await app.request(BOUNCE_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Growth-Signature': `v1=${createHmac('sha256', 'other-secret').update(body).digest('hex')}`,
+        'X-Growth-Timestamp': ts,
+        'X-Growth-Signature': sign(body, ts, 'other-secret'),
       },
       body,
     });
@@ -82,19 +128,43 @@ describe('signed receipt callbacks (Tier0 review P1)', () => {
     expect(await outreachRepo.listSuppressed()).toEqual([]);
   });
 
-  it('suppresses a signed bounce and replays the first result by eventId', async () => {
+  it('rejects stale, future and malformed timestamps even with a matching signature', async () => {
+    const { app, outreachRepo } = await buildApp({ callbackSecret: SECRET });
+    const body = JSON.stringify({ eventId: 'evt_t', email: 'jane@acme.com' });
+    const now = Math.floor(Date.now() / 1000);
+    for (const ts of [String(now - 301), String(now + 301), 'not-a-number']) {
+      const res = await app.request(BOUNCE_URL, {
+        method: 'POST',
+        headers: signedHeaders(body, ts),
+        body,
+      });
+      expect(res.status).toBe(401);
+    }
+    expect(await outreachRepo.listSuppressed()).toEqual([]);
+  });
+
+  it('rejects an exact signature replay but stays idempotent for a re-signed retry', async () => {
     const { app, outreachRepo } = await buildApp({ callbackSecret: SECRET });
     const body = JSON.stringify({ eventId: 'evt_b1', email: 'jane@acme.com' });
-    const headers = { 'Content-Type': 'application/json', 'X-Growth-Signature': sign(body) };
+    const headers = signedHeaders(body);
 
-    const first = await app.request('/api/v1/outreach/receipts/bounce', { method: 'POST', headers, body });
+    const first = await app.request(BOUNCE_URL, { method: 'POST', headers, body });
     expect(first.status).toBe(200);
     expect(await first.json()).toEqual({ ok: true });
 
-    // Replay with the same eventId: same result, no duplicate suppression work.
-    const replay = await app.request('/api/v1/outreach/receipts/bounce', { method: 'POST', headers, body });
-    expect(replay.status).toBe(200);
-    expect(await replay.json()).toEqual({ ok: true });
+    // Byte-identical replay (captured request resent as-is): rejected.
+    const replay = await app.request(BOUNCE_URL, { method: 'POST', headers, body });
+    expect(replay.status).toBe(401);
+
+    // ESP retry re-signs with a fresh timestamp: same eventId replays the
+    // first result without duplicating suppression work.
+    const retry = await app.request(BOUNCE_URL, {
+      method: 'POST',
+      headers: signedHeaders(body, String(Math.floor(Date.now() / 1000) + 1)),
+      body,
+    });
+    expect(retry.status).toBe(200);
+    expect(await retry.json()).toEqual({ ok: true });
     expect(await outreachRepo.listSuppressed()).toEqual([
       { email: 'jane@acme.com', reason: 'bounce', createdAt: expect.any(String) },
     ]);
@@ -103,9 +173,9 @@ describe('signed receipt callbacks (Tier0 review P1)', () => {
   it('requires eventId on signed callbacks', async () => {
     const { app, outreachRepo } = await buildApp({ callbackSecret: SECRET });
     const body = JSON.stringify({ email: 'jane@acme.com' });
-    const res = await app.request('/api/v1/outreach/receipts/bounce', {
+    const res = await app.request(BOUNCE_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Growth-Signature': sign(body) },
+      headers: signedHeaders(body),
       body,
     });
     expect(res.status).toBe(400);
@@ -128,14 +198,17 @@ describe('signed receipt callbacks (Tier0 review P1)', () => {
       from: 'jane@acme.com',
       text: 'Interested, call me.',
     });
-    const headers = { 'Content-Type': 'application/json', 'X-Growth-Signature': sign(body) };
 
-    const first = await app.request('/api/v1/outreach/receipts/reply', { method: 'POST', headers, body });
+    const first = await app.request(REPLY_URL, { method: 'POST', headers: signedHeaders(body), body });
     expect(first.status).toBe(201);
     const firstBody = (await first.json()) as { id: string; leadId: string; action: string };
     expect(firstBody).toMatchObject({ leadId: lead.id, action: 'reply' });
 
-    const replay = await app.request('/api/v1/outreach/receipts/reply', { method: 'POST', headers, body });
+    const replay = await app.request(REPLY_URL, {
+      method: 'POST',
+      headers: signedHeaders(body, String(Math.floor(Date.now() / 1000) + 1)),
+      body,
+    });
     expect(replay.status).toBe(201);
     const replayBody = (await replay.json()) as { id: string };
     expect(replayBody).toEqual(firstBody);
@@ -148,9 +221,9 @@ describe('signed receipt callbacks (Tier0 review P1)', () => {
   it('fails closed on a signed reply for an unknown messageId', async () => {
     const { app } = await buildApp({ callbackSecret: SECRET });
     const body = JSON.stringify({ eventId: 'evt_x', messageId: 'unknown', from: 'x@y.com', text: 'hi' });
-    const res = await app.request('/api/v1/outreach/receipts/reply', {
+    const res = await app.request(REPLY_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Growth-Signature': sign(body) },
+      headers: signedHeaders(body),
       body,
     });
     expect(res.status).toBe(404);
