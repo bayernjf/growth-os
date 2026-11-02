@@ -1,5 +1,5 @@
 import { createHmac } from 'node:crypto';
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { GrowthError } from '../research/errors.js';
 import type { OutreachService } from '../outreach/outreach-service.js';
 import { isEmailLocale } from '../mail/templates.js';
@@ -17,16 +17,96 @@ export interface OutreachAppDeps {
 }
 
 const SIGNATURE_HEADER = 'X-Growth-Signature';
+const TIMESTAMP_HEADER = 'X-Growth-Timestamp';
+
+/** Max accepted clock skew for callback timestamps (±5 minutes). */
+const CALLBACK_TIMESTAMP_TOLERANCE_MS = 300_000;
+/** Bound the in-memory replay cache; expired entries are pruned lazily. */
+const REPLAY_CACHE_LIMIT = 1024;
 
 /**
- * Verify `X-Growth-Signature: v1=<hex HMAC-SHA256(secret, rawBody)>` against
- * the exact raw request bytes (Tier0 review 2026-10-30 P1). Hex digests are
- * compared in constant time via secureEqual.
+ * A callback timestamp is a unix-seconds string within the tolerance window
+ * around now. Anything malformed, stale or too far in the future is rejected
+ * so a captured signature cannot be replayed outside its validity window.
  */
-function verifyCallbackSignature(rawBody: ArrayBuffer, header: string | undefined, secret: string): boolean {
+export function isFreshCallbackTimestamp(timestamp: string | undefined, nowMs: number): timestamp is string {
+  if (!timestamp || !/^\d{1,13}$/.test(timestamp)) return false;
+  const tsMs = Number(timestamp) * 1000;
+  return Number.isFinite(tsMs) && Math.abs(nowMs - tsMs) <= CALLBACK_TIMESTAMP_TOLERANCE_MS;
+}
+
+/**
+ * Signature scheme v2 (2026-11-02 review P1-1): `X-Growth-Signature:
+ * v1=<hex HMAC-SHA256(secret, "<unixSeconds>.<rawBody>")>` over the exact raw
+ * request bytes, compared in constant time via secureEqual. Binding the
+ * timestamp into the HMAC makes a captured pair expire with the timestamp.
+ */
+function verifyCallbackSignature(rawBody: ArrayBuffer, timestamp: string, header: string | undefined, secret: string): boolean {
   if (!header || !header.startsWith('v1=')) return false;
-  const expected = createHmac('sha256', secret).update(Buffer.from(rawBody)).digest('hex');
+  const expected = createHmac('sha256', secret)
+    .update(`${timestamp}.`)
+    .update(Buffer.from(rawBody))
+    .digest('hex');
   return secureEqual(expected, header.slice(3));
+}
+
+/**
+ * Returns true when this signature was already accepted and is still inside
+ * its validity window; otherwise records it. Exact-signature replays are
+ * rejected, while an ESP retry that re-signs with a fresh timestamp passes
+ * and is then deduplicated by the eventId idempotency below.
+ */
+function checkAndMarkSignature(cache: Map<string, number>, key: string, nowMs: number): boolean {
+  if (cache.size >= REPLAY_CACHE_LIMIT) {
+    for (const [k, expiresAt] of cache) {
+      if (expiresAt <= nowMs) cache.delete(k);
+    }
+  }
+  const expiresAt = cache.get(key);
+  if (expiresAt !== undefined && expiresAt > nowMs) return true;
+  cache.set(key, nowMs + CALLBACK_TIMESTAMP_TOLERANCE_MS);
+  return false;
+}
+
+type CallbackGate = (c: Context) => Promise<{ rawBody: ArrayBuffer } | Response>;
+
+/**
+ * Build the shared authentication gate for receipt callbacks. The gate is the
+ * only credential on these public routes (no Bearer token, 2026-11-02 review
+ * P1-1): it fails closed when no secret is configured, enforces a fresh
+ * timestamp, verifies the HMAC in constant time and rejects replayed
+ * signatures. The replay cache lives in this closure so each app instance
+ * gets its own (tests stay isolated).
+ */
+function createCallbackGate(secret: string | undefined): CallbackGate {
+  const seenSignatures = new Map<string, number>();
+  return async (c) => {
+    if (!secret) {
+      return c.json(
+        {
+          code: 'UNAUTHORIZED',
+          message: 'callback secret is not configured (GROWTH_OUTREACH_CALLBACK_SECRET); callbacks fail closed',
+          retryable: false,
+        },
+        401,
+      );
+    }
+    const unauthorized = (message: string) =>
+      c.json({ code: 'UNAUTHORIZED', message, retryable: false }, 401);
+    const rawBody = await c.req.arrayBuffer();
+    const timestamp = c.req.header(TIMESTAMP_HEADER);
+    if (!isFreshCallbackTimestamp(timestamp, Date.now())) {
+      return unauthorized('missing or stale callback timestamp');
+    }
+    const signature = c.req.header(SIGNATURE_HEADER);
+    if (!signature || !verifyCallbackSignature(rawBody, timestamp, signature, secret)) {
+      return unauthorized('missing or invalid callback signature');
+    }
+    if (checkAndMarkSignature(seenSignatures, signature, Date.now())) {
+      return unauthorized('replayed callback signature');
+    }
+    return { rawBody };
+  };
 }
 
 /** Parse a signed callback body from raw bytes; invalid JSON fails closed. */
@@ -40,6 +120,7 @@ function parseCallbackBody(rawBody: ArrayBuffer): Record<string, unknown> {
 
 export function createOutreachApp(deps: OutreachAppDeps): Hono {
   const app = new Hono();
+  const callbackGate = createCallbackGate(deps.callbackSecret);
 
   app.use('/api/v1/*', async (c, next) => {
     if (deps.apiToken) {
@@ -113,26 +194,17 @@ export function createOutreachApp(deps: OutreachAppDeps): Hono {
 
   app.get('/api/v1/outreach/suppressed', async (c) => c.json(await deps.service.listSuppressed()));
 
-  // Signed receipt callbacks (Tier0 review 2026-10-30 P1): these routes can
-  // mutate the suppress list and CRM, so each request must carry an
-  // HMAC-SHA256 signature over the raw body bytes and an eventId that makes
-  // processing idempotent. Without a configured secret they fail closed.
-  app.post('/api/v1/outreach/receipts/bounce', async (c) => {
-    if (!deps.callbackSecret) {
-      return c.json(
-        {
-          code: 'UNAUTHORIZED',
-          message: 'callback secret is not configured (GROWTH_OUTREACH_CALLBACK_SECRET); callbacks fail closed',
-          retryable: false,
-        },
-        401,
-      );
-    }
-    const rawBody = await c.req.arrayBuffer();
-    if (!verifyCallbackSignature(rawBody, c.req.header(SIGNATURE_HEADER), deps.callbackSecret)) {
-      return c.json({ code: 'UNAUTHORIZED', message: 'missing or invalid callback signature', retryable: false }, 401);
-    }
-    const body = parseCallbackBody(rawBody);
+  // Signed receipt callbacks (Tier0 review 2026-10-30 P1, moved 2026-11-02
+  // review P1-1): ESP webhooks cannot send a Bearer token, so these routes
+  // live under /pub/v1 outside the Bearer middleware and authenticate via the
+  // callback gate alone — timestamp-bound HMAC signature over the raw body,
+  // constant-time comparison, exact-signature replay rejection and an
+  // eventId that makes ESP retries idempotent. Without a configured secret
+  // they fail closed.
+  app.post('/pub/v1/outreach/receipts/bounce', async (c) => {
+    const gated = await callbackGate(c);
+    if (gated instanceof Response) return gated;
+    const body = parseCallbackBody(gated.rawBody);
     const eventId = String(body.eventId ?? '');
     if (!eventId) throw new GrowthError('VALIDATION_FAILED', 'eventId is required', 400);
     const email = String(body.email ?? '');
@@ -141,22 +213,10 @@ export function createOutreachApp(deps: OutreachAppDeps): Hono {
     return c.json({ ok: true });
   });
 
-  app.post('/api/v1/outreach/receipts/reply', async (c) => {
-    if (!deps.callbackSecret) {
-      return c.json(
-        {
-          code: 'UNAUTHORIZED',
-          message: 'callback secret is not configured (GROWTH_OUTREACH_CALLBACK_SECRET); callbacks fail closed',
-          retryable: false,
-        },
-        401,
-      );
-    }
-    const rawBody = await c.req.arrayBuffer();
-    if (!verifyCallbackSignature(rawBody, c.req.header(SIGNATURE_HEADER), deps.callbackSecret)) {
-      return c.json({ code: 'UNAUTHORIZED', message: 'missing or invalid callback signature', retryable: false }, 401);
-    }
-    const body = parseCallbackBody(rawBody);
+  app.post('/pub/v1/outreach/receipts/reply', async (c) => {
+    const gated = await callbackGate(c);
+    if (gated instanceof Response) return gated;
+    const body = parseCallbackBody(gated.rawBody);
     const eventId = String(body.eventId ?? '');
     if (!eventId) throw new GrowthError('VALIDATION_FAILED', 'eventId is required', 400);
     const messageId = String(body.messageId ?? '');
