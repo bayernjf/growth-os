@@ -5,6 +5,7 @@ import type { OutreachService } from '../outreach/outreach-service.js';
 import { isEmailLocale } from '../mail/templates.js';
 import { verifyUnsubscribeToken } from '../mail/unsubscribe-token.js';
 import { growthOnError } from './on-error.js';
+import { readJsonBody } from './read-json.js';
 import { secureEqual } from '../util/hash.js';
 
 export interface OutreachAppDeps {
@@ -136,7 +137,7 @@ export function createOutreachApp(deps: OutreachAppDeps): Hono {
 
   // campaigns
   app.post('/api/v1/outreach/campaigns', async (c) => {
-    const body = (await c.req.json()) as Record<string, unknown>;
+    const body = await readJsonBody(c);
     const leadIds = Array.isArray(body.leadIds) ? body.leadIds.map(String) : [];
     let locale: 'en' | 'zh' | undefined;
     if (body.locale !== undefined) {
@@ -185,7 +186,7 @@ export function createOutreachApp(deps: OutreachAppDeps): Hono {
 
   // receipts (T-G3-05)
   app.post('/api/v1/outreach/suppress', async (c) => {
-    const body = (await c.req.json()) as Record<string, unknown>;
+    const body = await readJsonBody(c);
     const email = String(body.email ?? '');
     if (!email) throw new GrowthError('VALIDATION_FAILED', 'email is required', 400);
     await deps.service.suppressEmail(email, body.reason !== undefined ? String(body.reason) : 'manual');

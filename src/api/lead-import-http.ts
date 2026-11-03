@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
 import type { LeadService } from '../crm/lead-service.js';
 import { csvToImportInputs, parseCsv, webhookToImportInput } from '../crm/lead-import.js';
-import { GrowthError } from '../research/errors.js';
 import { growthOnError } from './on-error.js';
+import { readJsonBody } from './read-json.js';
 import { secureEqual } from '../util/hash.js';
 
 export interface LeadImportAppDeps {
@@ -28,12 +28,7 @@ export function createLeadImportApp(deps: LeadImportAppDeps): Hono {
   // Generic webhook intake: vendor-neutral external inbox. The source origin
   // is taken from X-Source-Name, then body.source, defaulting to "webhook".
   app.post('/api/v1/crm/imports/webhook', async (c) => {
-    let body: Record<string, unknown>;
-    try {
-      body = (await c.req.json()) as Record<string, unknown>;
-    } catch {
-      throw new GrowthError('VALIDATION_FAILED', 'request body must be valid JSON', 400);
-    }
+    const body = await readJsonBody(c);
     const headerSource = c.req.header('X-Source-Name');
     const sourceRef =
       headerSource ?? (body.source !== undefined ? String(body.source) : 'webhook');

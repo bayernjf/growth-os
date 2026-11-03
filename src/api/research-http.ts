@@ -3,6 +3,7 @@ import { GrowthError } from '../research/errors.js';
 import type { ResearchService } from '../research/research-service.js';
 import type { SignalType } from '../research/types.js';
 import { growthOnError } from './on-error.js';
+import { readJsonBody } from './read-json.js';
 import { secureEqual } from '../util/hash.js';
 
 export interface ResearchAppDeps {
@@ -29,7 +30,7 @@ export function createResearchApp(deps: ResearchAppDeps): Hono {
 
   // topics
   app.post('/api/v1/research/topics', async (c) => {
-    const body = (await c.req.json()) as Record<string, unknown>;
+    const body = await readJsonBody(c);
     const topic = await deps.service.createTopic({
       title: String(body.title ?? ''),
       ...(body.description ? { description: String(body.description) } : {}),
@@ -49,7 +50,7 @@ export function createResearchApp(deps: ResearchAppDeps): Hono {
 
   // run
   app.post('/api/v1/research/run', async (c) => {
-    const body = (await c.req.json()) as Record<string, unknown>;
+    const body = await readJsonBody(c);
     const topicId = String(body.topicId ?? '');
     if (!topicId) throw new GrowthError('VALIDATION_FAILED', 'topicId is required', 400);
     return c.json(await deps.service.run(topicId));
@@ -64,7 +65,7 @@ export function createResearchApp(deps: ResearchAppDeps): Hono {
 
   // insights review
   app.post('/api/v1/research/insights/:id/review', async (c) => {
-    const body = (await c.req.json()) as Record<string, unknown>;
+    const body = await readJsonBody(c);
     const action = body.action === 'confirm' || body.action === 'reject' ? body.action : undefined;
     if (!action) throw new GrowthError('VALIDATION_FAILED', "action must be 'confirm' or 'reject'", 400);
     return c.json(await deps.service.reviewInsight(c.req.param('id'), action));

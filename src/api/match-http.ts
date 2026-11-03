@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { MatchService } from '../match/match-service.js';
 import { growthOnError } from './on-error.js';
+import { readJsonBody } from './read-json.js';
 import { secureEqual } from '../util/hash.js';
 
 export interface MatchAppDeps {
@@ -25,7 +26,7 @@ export function createMatchApp(deps: MatchAppDeps): Hono {
 
   // buyer demands
   app.post('/api/v1/match/demands', async (c) => {
-    const body = (await c.req.json()) as Record<string, unknown>;
+    const body = await readJsonBody(c);
     const demand = await deps.service.createDemand({
       title: String(body.title ?? ''),
       category: String(body.category ?? ''),
@@ -45,7 +46,7 @@ export function createMatchApp(deps: MatchAppDeps): Hono {
 
   // supplier offers
   app.post('/api/v1/match/offers', async (c) => {
-    const body = (await c.req.json()) as Record<string, unknown>;
+    const body = await readJsonBody(c);
     const offer = await deps.service.createOffer({
       title: String(body.title ?? ''),
       category: String(body.category ?? ''),
@@ -73,7 +74,7 @@ export function createMatchApp(deps: MatchAppDeps): Hono {
   );
 
   app.post('/api/v1/match/matches/:id/contact', async (c) => {
-    const body = (await c.req.json()) as Record<string, unknown>;
+    const body = await readJsonBody(c);
     const ownerEmail = String(body.ownerEmail ?? '');
     return c.json(await deps.service.contactMatch(c.req.param('id'), ownerEmail));
   });

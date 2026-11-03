@@ -3,6 +3,7 @@ import { GrowthError } from '../research/errors.js';
 import type { LeadService } from '../crm/lead-service.js';
 import type { LeadStatus } from '../crm/types.js';
 import { growthOnError } from './on-error.js';
+import { readJsonBody } from './read-json.js';
 import { secureEqual } from '../util/hash.js';
 
 export interface CrmAppDeps {
@@ -27,7 +28,7 @@ export function createCrmApp(deps: CrmAppDeps): Hono {
 
   // contacts
   app.post('/api/v1/crm/contacts', async (c) => {
-    const body = (await c.req.json()) as Record<string, unknown>;
+    const body = await readJsonBody(c);
     const contact = await deps.service.createContact({
       name: String(body.name ?? ''),
       ...(body.company !== undefined ? { company: String(body.company) } : {}),
@@ -46,7 +47,7 @@ export function createCrmApp(deps: CrmAppDeps): Hono {
 
   // leads
   app.post('/api/v1/crm/leads', async (c) => {
-    const body = (await c.req.json()) as Record<string, unknown>;
+    const body = await readJsonBody(c);
     const lead = await deps.service.createLead({
       title: String(body.title ?? ''),
       ...(body.sourceType !== undefined ? { sourceType: String(body.sourceType) as never } : {}),
@@ -65,7 +66,7 @@ export function createCrmApp(deps: CrmAppDeps): Hono {
 
   // promote high-intent signals -> leads (idempotent)
   app.post('/api/v1/crm/leads/promote', async (c) => {
-    const body = (await c.req.json()) as Record<string, unknown>;
+    const body = await readJsonBody(c);
     const topicId = String(body.topicId ?? '');
     if (!topicId) throw new GrowthError('VALIDATION_FAILED', 'topicId is required', 400);
     return c.json(await deps.service.promoteSignalsToLeads(topicId));
@@ -76,7 +77,7 @@ export function createCrmApp(deps: CrmAppDeps): Hono {
   );
 
   app.post('/api/v1/crm/leads/:id/transition', async (c) => {
-    const body = (await c.req.json()) as Record<string, unknown>;
+    const body = await readJsonBody(c);
     const status = String(body.status ?? '');
     return c.json(
       await deps.service.transitionLead(
@@ -88,7 +89,7 @@ export function createCrmApp(deps: CrmAppDeps): Hono {
   });
 
   app.post('/api/v1/crm/leads/:id/contact', async (c) => {
-    const body = (await c.req.json()) as Record<string, unknown>;
+    const body = await readJsonBody(c);
     const contactId = String(body.contactId ?? '');
     if (!contactId) throw new GrowthError('VALIDATION_FAILED', 'contactId is required', 400);
     return c.json(await deps.service.attachContact(c.req.param('id'), contactId));
@@ -99,7 +100,7 @@ export function createCrmApp(deps: CrmAppDeps): Hono {
   );
 
   app.post('/api/v1/crm/leads/:id/followups', async (c) => {
-    const body = (await c.req.json()) as Record<string, unknown>;
+    const body = await readJsonBody(c);
     const followup = await deps.service.addFollowup(c.req.param('id'), {
       action: String(body.action ?? ''),
       ...(body.note !== undefined ? { note: String(body.note) } : {}),
