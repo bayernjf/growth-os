@@ -234,6 +234,68 @@ describe('receipts and suppression (T-G3-05)', () => {
   });
 });
 
+describe('signed callback idempotency, insert-first-wins (2026-11-02 review P2-3)', () => {
+  it('claims a callback event id exactly once', async () => {
+    const stack = await makeStack();
+    const first = await stack.outreachRepo.recordCallbackEvent('evt_p', 'bounce', { ok: true });
+    const dupe = await stack.outreachRepo.recordCallbackEvent('evt_p', 'bounce', { ok: true });
+    expect(first).toBe(true);
+    expect(dupe).toBe(false);
+  });
+
+  it('bounce callback replays the first result and suppresses exactly once', async () => {
+    const stack = await makeStack();
+    const first = await stack.service.recordBounceCallback('evt_b', 'jane@acme.com');
+    const replay = await stack.service.recordBounceCallback('evt_b', 'jane@acme.com');
+    expect(first).toEqual({ ok: true });
+    expect(replay).toEqual({ ok: true });
+    expect(await stack.service.listSuppressed()).toEqual([
+      { email: 'jane@acme.com', reason: 'bounce', createdAt: FIXED_NOW },
+    ]);
+  });
+
+  it('reply callback replays the first followup without duplicating it', async () => {
+    const stack = await makeStack();
+    const { lead } = await seedLead(stack.crmRepo);
+    const { drafts } = await stack.service.createCampaign({ name: 'intro' }, [lead.id]);
+    await stack.outreachRepo.markSent(drafts[0]!.id, 'msg_1', FIXED_NOW);
+
+    const first = await stack.service.recordReplyCallback('evt_r', 'msg_1', 'jane@acme.com', 'Interested');
+    const replay = await stack.service.recordReplyCallback('evt_r', 'msg_1', 'jane@acme.com', 'Interested');
+    expect(replay.followup.id).toBe(first.followup.id);
+
+    const followups = await stack.crmRepo.listFollowups(lead.id);
+    expect(followups).toHaveLength(1);
+    expect(followups[0]?.id).toBe(first.followup.id);
+  });
+
+  it('returns the winner’s recorded result when the event id was already claimed', async () => {
+    const stack = await makeStack();
+    const { lead } = await seedLead(stack.crmRepo);
+    const { drafts } = await stack.service.createCampaign({ name: 'intro' }, [lead.id]);
+    await stack.outreachRepo.markSent(drafts[0]!.id, 'msg_1', FIXED_NOW);
+
+    // A concurrent winner committed its claim and result first.
+    const winner = { followup: { id: 'fup_winner', leadId: lead.id, action: 'reply' } };
+    await stack.outreachRepo.recordCallbackEvent('evt_taken', 'reply', winner);
+
+    const replay = await stack.service.recordReplyCallback('evt_taken', 'msg_1', 'jane@acme.com', 'hi');
+    expect(replay).toEqual(winner);
+    expect(await stack.crmRepo.listFollowups(lead.id)).toHaveLength(0);
+  });
+
+  it('processes distinct event ids independently', async () => {
+    const stack = await makeStack();
+    const { lead } = await seedLead(stack.crmRepo);
+    const { drafts } = await stack.service.createCampaign({ name: 'intro' }, [lead.id]);
+    await stack.outreachRepo.markSent(drafts[0]!.id, 'msg_1', FIXED_NOW);
+
+    await stack.service.recordReplyCallback('evt_1', 'msg_1', 'jane@acme.com', 'first');
+    await stack.service.recordReplyCallback('evt_2', 'msg_1', 'jane@acme.com', 'second');
+    expect(await stack.crmRepo.listFollowups(lead.id)).toHaveLength(2);
+  });
+});
+
 describe('multilingual outreach (T-G3-07)', () => {
   const COMPLIANCE_WRITER = new TemplateDraftWriter(() => ({
     identity: 'BayJF · owner@example.com',
