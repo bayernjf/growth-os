@@ -331,6 +331,12 @@ export class SalesRepository {
     return row ? this.mapOrder(row) : undefined;
   }
 
+  /** The single order allowed per signed contract (2026-11-02 review P2-4). */
+  async findOrderByContract(contractId: string): Promise<Order | undefined> {
+    const row = await this.driver.get<OrderRow>('SELECT * FROM orders WHERE contract_id = ?', [contractId]);
+    return row ? this.mapOrder(row) : undefined;
+  }
+
   async listOrders(): Promise<Order[]> {
     const rows = await this.driver.all<OrderRow>('SELECT * FROM orders ORDER BY created_at DESC');
     return rows.map((r) => this.mapOrder(r));
