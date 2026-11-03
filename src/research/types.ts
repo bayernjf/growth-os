@@ -27,7 +27,9 @@ export const INSIGHT_CATEGORIES = ['need', 'pain', 'comparison'] as const;
 export type InsightCategory = (typeof INSIGHT_CATEGORIES)[number];
 
 export type InsightStatus = 'pending_review' | 'confirmed' | 'rejected';
-export type TopicStatus = 'draft' | 'running' | 'done';
+// 'failed' marks a run that threw after entering 'running' (P2-1): without it
+// a provider error wedged the topic in 'running' forever.
+export type TopicStatus = 'draft' | 'running' | 'done' | 'failed';
 
 export interface ResearchTopic {
   id: string;

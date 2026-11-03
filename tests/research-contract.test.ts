@@ -5,8 +5,8 @@ import { ResearchRepository } from '../src/research/repository.js';
 import { ResearchService } from '../src/research/research-service.js';
 import { SqliteDriver } from '../src/storage/sqlite/sqlite-driver.js';
 import { migrateUp } from '../src/storage/migrate.js';
-import { GrowthError } from '../src/research/errors.js';
-import { SIGNAL_TYPES } from '../src/research/types.js';
+import { Errors, GrowthError } from '../src/research/errors.js';
+import { SIGNAL_TYPES, type RawMention } from '../src/research/types.js';
 
 const FIXED_NOW = '2026-10-25T00:00:00Z';
 
@@ -170,5 +170,74 @@ describe('online missing credentials fail closed', () => {
     expect(err).toBeInstanceOf(GrowthError);
     expect(err.status).toBe(422);
     expect(err.code).toBe('CREDENTIAL_MISSING');
+    // P2-1: the failed run must surface as 'failed', not stay 'running'.
+    expect((await service.getTopic(topic.id)).status).toBe('failed');
+  });
+});
+
+describe('failed runs surface as topic status failed (2026-11-02 review P2-1)', () => {
+  /** Provider that fails a fixed number of searches, then serves one mention. */
+  class FlakyProvider {
+    readonly name = 'flaky';
+    readonly online = true;
+    failuresLeft: number;
+
+    constructor(failures: number) {
+      this.failuresLeft = failures;
+    }
+
+    async search(): Promise<RawMention[]> {
+      if (this.failuresLeft > 0) {
+        this.failuresLeft -= 1;
+        throw Errors.searchUnavailable('provider down');
+      }
+      return [
+        {
+          sourceType: 'web',
+          signalType: 'need',
+          title: 'looking for an ai crm for cold email outreach',
+          content: 'we need a personal agent for lead generation and follow up',
+          url: 'https://example.com/need-1',
+          publishedAt: FIXED_NOW,
+        },
+      ];
+    }
+  }
+
+  async function makeFlakyStack(failures: number) {
+    const driver = new SqliteDriver(':memory:');
+    await migrateUp(driver);
+    const repo = new ResearchRepository(driver);
+    const provider = new FlakyProvider(failures);
+    const service = new ResearchService({
+      repo,
+      provider,
+      scoring: loadConfig().scoring,
+      now: () => FIXED_NOW,
+    });
+    return { service, provider };
+  }
+
+  it('marks the topic failed when the provider throws mid-run', async () => {
+    const { service } = await makeFlakyStack(1);
+    const topic = await service.createTopic({ title: 't', keywords: KEYWORDS });
+
+    await expect(service.run(topic.id)).rejects.toMatchObject({
+      code: 'SEARCH_UNAVAILABLE',
+      status: 503,
+    });
+    expect((await service.getTopic(topic.id)).status).toBe('failed');
+  });
+
+  it('allows a retry after failure and reaches done', async () => {
+    const { service } = await makeFlakyStack(1);
+    const topic = await service.createTopic({ title: 't', keywords: KEYWORDS });
+
+    await expect(service.run(topic.id)).rejects.toMatchObject({ code: 'SEARCH_UNAVAILABLE' });
+    expect((await service.getTopic(topic.id)).status).toBe('failed');
+
+    const result = await service.run(topic.id);
+    expect(result.topic.status).toBe('done');
+    expect(result.signals.length).toBeGreaterThan(0);
   });
 });
