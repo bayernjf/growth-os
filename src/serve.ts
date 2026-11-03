@@ -149,6 +149,7 @@ async function main(): Promise<void> {
     console.log(
       `growth-os auth posture: mode=${posture.mode} researchBearer=${posture.researchBearer} ` +
         `callbackSecret=${posture.callbackSecret} unsubscribe=${posture.unsubscribe} ` +
+        `mcp=${posture.mcp} ` +
         `search=${posture.search} zeus=${posture.zeus} mail=${posture.mail}`,
     );
     console.log(

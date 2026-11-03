@@ -45,6 +45,12 @@ export interface AuthPosture {
   callbackSecret: 'set' | 'unset';
   /** HMAC secret for one-click unsubscribe tokens (T-G3-07). */
   unsubscribe: 'set' | 'unset';
+  /**
+   * Bearer guard on /mcp (2026-11-02 review P2-2). 'unset' is the documented
+   * open-for-localhost default (.env.example); it is surfaced here so an
+   * operator binding GROWTH_HOST beyond loopback can spot the open endpoint.
+   */
+  mcp: 'set' | 'unset';
   search: 'offline' | 'online';
   zeus: 'off' | 'online';
   mail: 'off' | 'smtp';
@@ -57,6 +63,7 @@ export function authPosture(
     | 'apiToken'
     | 'outreachCallbackSecret'
     | 'mailUnsubscribeSecret'
+    | 'mcpToken'
     | 'searchMode'
     | 'zeusMode'
     | 'mailMode'
@@ -67,6 +74,7 @@ export function authPosture(
     researchBearer: config.apiToken ? 'set' : 'unset',
     callbackSecret: config.outreachCallbackSecret ? 'set' : 'unset',
     unsubscribe: config.mailUnsubscribeSecret ? 'set' : 'unset',
+    mcp: config.mcpToken ? 'set' : 'unset',
     search: config.searchMode,
     zeus: config.zeusMode,
     mail: config.mailMode,

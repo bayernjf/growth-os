@@ -3,6 +3,7 @@
 
 import { Hono } from 'hono';
 import { growthOnError } from './on-error.js';
+import { readJsonBody } from './read-json.js';
 import { secureEqual } from '../util/hash.js';
 import type { SalesService } from '../sales/sales-service.js';
 
@@ -29,7 +30,7 @@ export function createSalesApp(deps: SalesAppDeps): Hono {
   // ---------- quotes ----------
 
   app.post('/api/v1/sales/quotes', async (c) => {
-    const body = (await c.req.json()) as Record<string, unknown>;
+    const body = await readJsonBody(c);
     const leadId = typeof body.leadId === 'string' ? body.leadId : undefined;
     const lineItems = Array.isArray(body.lineItems) ? body.lineItems : [];
     const quote = leadId
@@ -73,7 +74,7 @@ export function createSalesApp(deps: SalesAppDeps): Hono {
   // ---------- contracts ----------
 
   app.post('/api/v1/sales/contracts', async (c) => {
-    const body = (await c.req.json()) as { quoteId?: string; terms?: Record<string, unknown>; note?: string };
+    const body = (await readJsonBody(c)) as { quoteId?: string; terms?: Record<string, unknown>; note?: string };
     if (typeof body.quoteId !== 'string') {
       return c.json({ code: 'VALIDATION_FAILED', message: 'quoteId required', retryable: false }, 400);
     }
@@ -92,7 +93,7 @@ export function createSalesApp(deps: SalesAppDeps): Hono {
   // ---------- orders ----------
 
   app.post('/api/v1/sales/orders', async (c) => {
-    const body = (await c.req.json()) as { contractId?: string; note?: string };
+    const body = (await readJsonBody(c)) as { contractId?: string; note?: string };
     if (typeof body.contractId !== 'string') {
       return c.json({ code: 'VALIDATION_FAILED', message: 'contractId required', retryable: false }, 400);
     }

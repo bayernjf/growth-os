@@ -5,8 +5,9 @@
 import type { Contact, ContactInput, Lead, LeadFollowup, LeadFollowupInput, LeadInput } from '../crm/types.js';
 import type { DecisionPort } from '../decision/types.js';
 import type { MailPort } from '../mail/types.js';
-import { OfflineReplyTranslator, type ReplyTranslator } from '../mail/reply-translator.js';
+import { OfflineReplyTranslator, type ReplyTranslator, type TranslatedReply } from '../mail/reply-translator.js';
 import { Errors } from '../research/errors.js';
+import type { StorageTxn } from '../storage/driver.js';
 import type { DraftWriter } from './content.js';
 import type { OutreachRepository } from './repository.js';
 import type { Campaign, CampaignInput, OutreachDraft, OutreachEvent, SuppressedEmail } from './types.js';
@@ -15,9 +16,18 @@ export interface LeadSource {
   getLead(id: string): Promise<Lead | undefined>;
   getContact(id: string): Promise<Contact | undefined>;
   addFollowup(leadId: string, input: LeadFollowupInput): Promise<LeadFollowup>;
+  /** Followup insert joining an explicit transaction (signed reply callbacks). */
+  addFollowupOnTx(tx: StorageTxn, leadId: string, input: LeadFollowupInput): Promise<LeadFollowup>;
   createContact(input: ContactInput): Promise<Contact>;
   createLead(input: LeadInput): Promise<Lead>;
 }
+
+/**
+ * Thrown inside a callback transaction when the event id insert lost the race
+ * (ON CONFLICT DO NOTHING): the whole transaction — including the followup or
+ * suppression just written — rolls back and the winner's result is replayed.
+ */
+class CallbackReplayError extends Error {}
 
 export interface OutreachServiceDeps {
   repo: OutreachRepository;
@@ -211,8 +221,26 @@ export class OutreachService {
     return this.repo.addSuppressed(email, 'bounce', this.now());
   }
 
-  /** A reply reflows back to the lead as a review follow-up. */
+  /**
+   * A reply reflows back to the lead as a review follow-up. An unsubscribe
+   * reply also suppresses the sender (2026-11-02 review P2-5): continuing to
+   * mail an address that asked to opt out violates CAN-SPAM/CASL/ePrivacy.
+   * The suppressed_emails row (reason 'unsubscribe-reply') is the audit trail.
+   */
   async recordReply(messageId: string, from: string, text: string): Promise<LeadFollowup> {
+    const { lead, note, translated } = await this.resolveReply(messageId, from, text);
+    if (translated.intent === 'unsubscribe') {
+      await this.repo.addSuppressed(from, 'unsubscribe-reply', this.now());
+    }
+    return this.leads.addFollowup(lead.id, { action: 'reply', note });
+  }
+
+  /** Resolve the draft/lead for a reply and build the translated followup note. */
+  private async resolveReply(
+    messageId: string,
+    from: string,
+    text: string,
+  ): Promise<{ draft: OutreachDraft; lead: Lead; note: string; translated: TranslatedReply }> {
     const draft = await this.repo.findDraftByMessageId(messageId);
     if (!draft) throw Errors.notFound(`draft with messageId ${messageId}`);
     const lead = await this.leads.getLead(draft.leadId);
@@ -220,27 +248,40 @@ export class OutreachService {
     const translated = await this.translator.translate(text, 'en');
     const note =
       `from ${from}: ${text} [intent=${translated.intent}, locale=${translated.detectedLocale}]`;
-    return this.leads.addFollowup(lead.id, { action: 'reply', note });
+    return { draft, lead, note, translated };
   }
 
   // ---------- signed receipt callbacks (Tier0 review 2026-10-30 P1) ----------
 
   /**
-   * Signed bounce callback, idempotent by callback event id: a replay returns
-   * the first result and must not touch the suppress list again.
+   * Signed bounce callback, idempotent by callback event id. Insert-first-wins
+   * (2026-11-02 review P2-3): the suppression and the event claim commit in one
+   * transaction; a concurrent replay loses the claim insert, rolls its side
+   * effect back and returns the winner's recorded result.
    */
   async recordBounceCallback(eventId: string, email: string): Promise<{ ok: true }> {
     const existing = await this.repo.getCallbackEvent(eventId);
     if (existing) return existing.result as { ok: true };
-    await this.repo.addSuppressed(email, 'bounce', this.now());
-    const result = { ok: true } as const;
-    await this.repo.recordCallbackEvent(eventId, 'bounce', result, this.now());
-    return result;
+    try {
+      return await this.repo.transaction(async (tx) => {
+        await this.repo.addSuppressedOnTx(tx, email, 'bounce', this.now());
+        const result = { ok: true } as const;
+        const claimed = await this.repo.recordCallbackEventOnTx(tx, eventId, 'bounce', result, this.now());
+        if (!claimed) throw new CallbackReplayError();
+        return result;
+      });
+    } catch (err) {
+      const replayed = await this.replayedResult(err, eventId);
+      if (replayed !== undefined) return replayed as { ok: true };
+      throw err;
+    }
   }
 
   /**
    * Signed reply callback, idempotent by callback event id: a replay returns
    * the followup created by the first delivery and must not add another one.
+   * The followup insert and the event claim are one transaction (P2-3), so a
+   * concurrent replay cannot persist a duplicate followup.
    */
   async recordReplyCallback(
     eventId: string,
@@ -250,9 +291,29 @@ export class OutreachService {
   ): Promise<{ followup: LeadFollowup }> {
     const existing = await this.repo.getCallbackEvent(eventId);
     if (existing) return existing.result as { followup: LeadFollowup };
-    const followup = await this.recordReply(messageId, from, text);
-    await this.repo.recordCallbackEvent(eventId, 'reply', { followup }, this.now());
-    return { followup };
+    const { lead, note, translated } = await this.resolveReply(messageId, from, text);
+    try {
+      return await this.repo.transaction(async (tx) => {
+        const followup = await this.leads.addFollowupOnTx(tx, lead.id, { action: 'reply', note });
+        if (translated.intent === 'unsubscribe') {
+          await this.repo.addSuppressedOnTx(tx, from, 'unsubscribe-reply', this.now());
+        }
+        const claimed = await this.repo.recordCallbackEventOnTx(tx, eventId, 'reply', { followup }, this.now());
+        if (!claimed) throw new CallbackReplayError();
+        return { followup };
+      });
+    } catch (err) {
+      const replayed = await this.replayedResult(err, eventId);
+      if (replayed !== undefined) return replayed as { followup: LeadFollowup };
+      throw err;
+    }
+  }
+
+  /** On a lost claim race, fetch the result recorded by the winning delivery. */
+  private async replayedResult(err: unknown, eventId: string): Promise<unknown | undefined> {
+    if (!(err instanceof CallbackReplayError)) return undefined;
+    const first = await this.repo.getCallbackEvent(eventId);
+    return first?.result;
   }
 
   private async mustGetDraft(id: string): Promise<OutreachDraft> {

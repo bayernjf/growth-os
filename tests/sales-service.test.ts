@@ -193,6 +193,41 @@ describe('contracts and orders gates', () => {
     expect(order.amountCents).toBe(200_000);
     expect((await service.listOrders()).length).toBe(1);
   });
+
+  it('allows only one order per signed contract and answers 409 on a duplicate (P2-4)', async () => {
+    const { service } = await stack();
+    const quoteId = await acceptedQuote(service);
+    const c = await service.createContract(quoteId);
+    await service.sendContract(c.id);
+    await service.signContract(c.id);
+
+    const order = await service.createOrder(c.id);
+    expect(order.orderNo).toBe('ORD-00001');
+
+    await expect(service.createOrder(c.id)).rejects.toMatchObject({ code: 'CONFLICT', status: 409 });
+    expect((await service.listOrders()).length).toBe(1);
+  });
+
+  it('backstops one-order-per-contract at the database level (P2-4)', async () => {
+    const { repo } = await stack();
+    await repo.insertQuote({
+      id: 'quote_1', customerName: 'A', customerEmail: '', lineItems: items(),
+      amountCents: 200_000, currency: 'CNY', note: '', now: NOW,
+    });
+    await repo.insertContract({ id: 'contract_1', quoteId: 'quote_1', termsSnapshot: {}, note: '', now: NOW });
+    await repo.insertOrder({
+      id: 'order_1', orderNo: 'ORD-00001', quoteId: 'quote_1', contractId: 'contract_1',
+      amountCents: 200_000, currency: 'CNY', note: '', now: NOW,
+    });
+    // A lost race must fail on the partial unique index, never persist a dup.
+    await expect(
+      repo.insertOrder({
+        id: 'order_2', orderNo: 'ORD-00002', quoteId: 'quote_1', contractId: 'contract_1',
+        amountCents: 200_000, currency: 'CNY', note: '', now: NOW,
+      }),
+    ).rejects.toThrow(/UNIQUE/i);
+    expect((await repo.listOrders()).length).toBe(1);
+  });
 });
 
 describe('lead conversion (OP-18)', () => {

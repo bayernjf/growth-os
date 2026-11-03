@@ -1,6 +1,6 @@
 // growth-os G3 outreach persistence (dialect-agnostic; no JSON columns).
 
-import type { StorageDriver } from '../storage/driver.js';
+import type { StorageDriver, StorageTxn } from '../storage/driver.js';
 import { newId } from '../util/hash.js';
 import type {
   CallbackEvent,
@@ -68,6 +68,14 @@ export interface OutreachEventRefs {
 
 export class OutreachRepository {
   constructor(private readonly driver: StorageDriver) {}
+
+  /**
+   * Run a unit of work across callback claims and their side effects in one
+   * transaction (signed receipt callbacks, 2026-11-02 review P2-3).
+   */
+  transaction<T>(fn: (tx: StorageTxn) => Promise<T>): Promise<T> {
+    return this.driver.transaction(fn);
+  }
 
   // ---------- campaigns ----------
 
@@ -270,13 +278,27 @@ export class OutreachRepository {
   // ---------- suppressed emails (receipts) ----------
 
   async addSuppressed(email: string, reason: string, now?: string): Promise<void> {
+    return this.insertSuppressed(this.driver, email, reason, now);
+  }
+
+  /** Suppress on an explicit transaction (signed callback atomicity, P2-3). */
+  addSuppressedOnTx(tx: StorageTxn, email: string, reason: string, now?: string): Promise<void> {
+    return this.insertSuppressed(tx, email, reason, now);
+  }
+
+  private async insertSuppressed(
+    runner: StorageTxn,
+    email: string,
+    reason: string,
+    now?: string,
+  ): Promise<void> {
     const ts = now ?? new Date().toISOString();
-    const existing = await this.driver.get<{ email: string }>(
+    const existing = await runner.get<{ email: string }>(
       'SELECT email FROM suppressed_emails WHERE email = ?',
       [email],
     );
     if (existing) return;
-    await this.driver.run('INSERT INTO suppressed_emails (email, reason, created_at) VALUES (?,?,?)', [
+    await runner.run('INSERT INTO suppressed_emails (email, reason, created_at) VALUES (?,?,?)', [
       email,
       reason,
       ts,
@@ -314,9 +336,30 @@ export class OutreachRepository {
   }
 
   /** Insert-first-wins: returns false when the event id was already recorded. */
-  async recordCallbackEvent(id: string, kind: CallbackEventKind, result: unknown, now?: string): Promise<boolean> {
+  recordCallbackEvent(id: string, kind: CallbackEventKind, result: unknown, now?: string): Promise<boolean> {
+    return this.insertCallbackEvent(this.driver, id, kind, result, now);
+  }
+
+  /** Claim a callback event id on an explicit transaction (P2-3). */
+  recordCallbackEventOnTx(
+    tx: StorageTxn,
+    id: string,
+    kind: CallbackEventKind,
+    result: unknown,
+    now?: string,
+  ): Promise<boolean> {
+    return this.insertCallbackEvent(tx, id, kind, result, now);
+  }
+
+  private async insertCallbackEvent(
+    runner: StorageTxn,
+    id: string,
+    kind: CallbackEventKind,
+    result: unknown,
+    now?: string,
+  ): Promise<boolean> {
     const ts = now ?? new Date().toISOString();
-    const r = await this.driver.run(
+    const r = await runner.run(
       `INSERT INTO outreach_callback_events (id,kind,result,created_at) VALUES (?,?,?,?)
        ON CONFLICT (id) DO NOTHING`,
       [id, kind, JSON.stringify(result), ts],

@@ -290,6 +290,25 @@ export class CrmRepository {
   // ---------- followups ----------
 
   async addFollowup(leadId: string, input: LeadFollowupInput, now?: string): Promise<LeadFollowup> {
+    return this.insertFollowup(this.driver, leadId, input, now);
+  }
+
+  /** Insert a followup on an explicit transaction (signed reply callbacks, P2-3). */
+  addFollowupOnTx(
+    tx: StorageTxn,
+    leadId: string,
+    input: LeadFollowupInput,
+    now?: string,
+  ): Promise<LeadFollowup> {
+    return this.insertFollowup(tx, leadId, input, now);
+  }
+
+  private async insertFollowup(
+    runner: StorageTxn,
+    leadId: string,
+    input: LeadFollowupInput,
+    now?: string,
+  ): Promise<LeadFollowup> {
     const ts = now ?? new Date().toISOString();
     const followup: LeadFollowup = {
       id: newId('fup'),
@@ -300,7 +319,7 @@ export class CrmRepository {
       ...(input.dueAt ? { dueAt: input.dueAt } : {}),
       createdAt: ts,
     };
-    await this.driver.run(
+    await runner.run(
       `INSERT INTO lead_followups
         (id,lead_id,action,note,source_signal_ids,due_at,done_at,created_at)
        VALUES (?,?,?,?,?,?,?,?)`,

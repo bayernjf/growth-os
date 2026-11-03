@@ -214,8 +214,12 @@ export class SalesService {
       throw Errors.invalidTransition(`cannot order from a ${contract.status} contract (must be signed)`);
     }
     const quote = await this.getQuote(contract.quoteId);
-    const existing = await this.repo.listOrders();
-    const orderNo = `ORD-${String(existing.length + 1).padStart(5, '0')}`;
+    // One order per signed contract (P2-4): pre-check answers a clean 409 and
+    // the partial unique index idx_orders_contract_unique (migration 013) is
+    // the backstop so a lost race fails instead of duplicating money.
+    const existingForContract = await this.repo.findOrderByContract(contractId);
+    if (existingForContract) throw Errors.conflict(`contract ${contractId} already has order ${existingForContract.id}`);
+    const orderNo = `ORD-${String((await this.repo.countOrders()) + 1).padStart(5, '0')}`;
     const dup = await this.repo.findOrderByNo(orderNo);
     if (dup) throw Errors.conflict(`order number ${orderNo} already exists`);
     const now = this.now();

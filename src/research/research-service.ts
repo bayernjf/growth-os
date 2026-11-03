@@ -81,54 +81,62 @@ export class ResearchService {
     const topic = await this.getTopic(topicId);
     await this.repo.setTopicStatus(topic.id, 'running', this.now());
 
-    const mentions = await this.provider.search({
-      keywords: topic.keywords,
-      signalTypes: topic.signalTypes,
-      language: topic.language,
-    });
-    const fresh = collectSignals({
-      topicId: topic.id,
-      provider: this.provider.name,
-      keywords: topic.keywords,
-      mentions,
-      cfg: this.scoring,
-      now: this.now(),
-    });
-    await this.repo.insertSignals(fresh);
+    try {
+      const mentions = await this.provider.search({
+        keywords: topic.keywords,
+        signalTypes: topic.signalTypes,
+        language: topic.language,
+      });
+      const fresh = collectSignals({
+        topicId: topic.id,
+        provider: this.provider.name,
+        keywords: topic.keywords,
+        mentions,
+        cfg: this.scoring,
+        now: this.now(),
+      });
+      await this.repo.insertSignals(fresh);
 
-    // Reports and insights are computed over the topic's full, deduped set.
-    const signals = await this.repo.listSignals(topic.id);
+      // Reports and insights are computed over the topic's full, deduped set.
+      const signals = await this.repo.listSignals(topic.id);
 
-    const existing = await this.repo.listInsights(topic.id);
-    const occupied = new Set(
-      existing.filter((i) => i.status !== 'rejected').map((i) => i.title),
-    );
-    const candidates = clusterInsights({
-      topicId: topic.id,
-      signals,
-      keywords: topic.keywords,
-      minScore: this.scoring.insightMinScore,
-      now: this.now(),
-    }).filter((c) => !occupied.has(c.title));
-    await this.repo.insertInsights(candidates);
-    const insights = await this.repo.listInsights(topic.id);
+      const existing = await this.repo.listInsights(topic.id);
+      const occupied = new Set(
+        existing.filter((i) => i.status !== 'rejected').map((i) => i.title),
+      );
+      const candidates = clusterInsights({
+        topicId: topic.id,
+        signals,
+        keywords: topic.keywords,
+        minScore: this.scoring.insightMinScore,
+        now: this.now(),
+      }).filter((c) => !occupied.has(c.title));
+      await this.repo.insertInsights(candidates);
+      const insights = await this.repo.listInsights(topic.id);
 
-    const version = await this.repo.nextReportVersion(topic.id);
-    const report = generateReport({
-      topic,
-      signals,
-      insights,
-      mode: this.provider.name,
-      version,
-      topN: this.scoring.reportTopN,
-      minScore: this.scoring.insightMinScore,
-      now: this.now(),
-    });
-    await this.repo.insertReport(report);
+      const version = await this.repo.nextReportVersion(topic.id);
+      const report = generateReport({
+        topic,
+        signals,
+        insights,
+        mode: this.provider.name,
+        version,
+        topN: this.scoring.reportTopN,
+        minScore: this.scoring.insightMinScore,
+        now: this.now(),
+      });
+      await this.repo.insertReport(report);
 
-    await this.repo.setTopicStatus(topic.id, 'done', this.now());
-    const finalTopic = await this.getTopic(topic.id);
-    return { topic: finalTopic, signals, insights, report };
+      await this.repo.setTopicStatus(topic.id, 'done', this.now());
+      const finalTopic = await this.getTopic(topic.id);
+      return { topic: finalTopic, signals, insights, report };
+    } catch (err) {
+      // P2-1: a failed run must not wedge the topic in 'running' — operators
+      // could not tell it apart from an in-flight run. Best-effort transition:
+      // never mask the original failure if the status write itself fails.
+      await this.repo.setTopicStatus(topic.id, 'failed', this.now()).catch(() => {});
+      throw err;
+    }
   }
 
   /** Human review gate for an insight candidate. */
