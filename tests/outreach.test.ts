@@ -296,6 +296,57 @@ describe('signed callback idempotency, insert-first-wins (2026-11-02 review P2-3
   });
 });
 
+describe('unsubscribe replies suppress the sender (2026-11-02 review P2-5)', () => {
+  async function seedSentDraft(stack: Awaited<ReturnType<typeof makeStack>>) {
+    const { lead } = await seedLead(stack.crmRepo);
+    const { drafts } = await stack.service.createCampaign({ name: 'intro' }, [lead.id]);
+    const draft = drafts[0]!;
+    await stack.service.submitDraft(draft.id);
+    (stack.decision as FakeDecisionPort).verdicts['dec_1'] = 'approved';
+    await stack.service.checkApproval(draft.id);
+    await stack.service.sendDraft(draft.id);
+    return { lead, draft };
+  }
+
+  it('suppresses an unsubscribe reply, keeps the followup, and blocks the next send', async () => {
+    const stack = await makeStack();
+    const { lead, draft } = await seedSentDraft(stack);
+
+    const followup = await stack.service.recordReply('msg_1', 'jane@acme.com', 'Please unsubscribe me.');
+    expect(followup.leadId).toBe(lead.id);
+    expect(followup.note).toContain('[intent=unsubscribe, locale=en]');
+
+    expect(await stack.service.listSuppressed()).toEqual([
+      { email: 'jane@acme.com', reason: 'unsubscribe-reply', createdAt: FIXED_NOW },
+    ]);
+    // Closed loop: the send path fails closed on a suppressed address.
+    await stack.outreachRepo.markApproved(draft.id, FIXED_NOW);
+    await expect(stack.service.sendDraft(draft.id)).rejects.toMatchObject({ code: 'CONFLICT', status: 409 });
+    expect(stack.mail.sent).toHaveLength(1);
+  });
+
+  it('suppresses a zh unsubscribe reply arriving via the signed callback, idempotently', async () => {
+    const stack = await makeStack();
+    const { lead } = await seedSentDraft(stack);
+
+    await stack.service.recordReplyCallback('evt_u', 'msg_1', 'jane@acme.com', '请退订，不要再发了');
+    await stack.service.recordReplyCallback('evt_u', 'msg_1', 'jane@acme.com', '请退订，不要再发了');
+
+    expect(await stack.service.listSuppressed()).toEqual([
+      { email: 'jane@acme.com', reason: 'unsubscribe-reply', createdAt: FIXED_NOW },
+    ]);
+    expect(await stack.crmRepo.listFollowups(lead.id)).toHaveLength(1);
+  });
+
+  it('does not suppress a non-unsubscribe reply', async () => {
+    const stack = await makeStack();
+    await seedSentDraft(stack);
+
+    await stack.service.recordReply('msg_1', 'jane@acme.com', 'Interested, call me.');
+    expect(await stack.service.listSuppressed()).toEqual([]);
+  });
+});
+
 describe('multilingual outreach (T-G3-07)', () => {
   const COMPLIANCE_WRITER = new TemplateDraftWriter(() => ({
     identity: 'BayJF · owner@example.com',

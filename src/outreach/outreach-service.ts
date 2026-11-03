@@ -221,9 +221,17 @@ export class OutreachService {
     return this.repo.addSuppressed(email, 'bounce', this.now());
   }
 
-  /** A reply reflows back to the lead as a review follow-up. */
+  /**
+   * A reply reflows back to the lead as a review follow-up. An unsubscribe
+   * reply also suppresses the sender (2026-11-02 review P2-5): continuing to
+   * mail an address that asked to opt out violates CAN-SPAM/CASL/ePrivacy.
+   * The suppressed_emails row (reason 'unsubscribe-reply') is the audit trail.
+   */
   async recordReply(messageId: string, from: string, text: string): Promise<LeadFollowup> {
-    const { lead, note } = await this.resolveReply(messageId, from, text);
+    const { lead, note, translated } = await this.resolveReply(messageId, from, text);
+    if (translated.intent === 'unsubscribe') {
+      await this.repo.addSuppressed(from, 'unsubscribe-reply', this.now());
+    }
     return this.leads.addFollowup(lead.id, { action: 'reply', note });
   }
 
@@ -283,10 +291,13 @@ export class OutreachService {
   ): Promise<{ followup: LeadFollowup }> {
     const existing = await this.repo.getCallbackEvent(eventId);
     if (existing) return existing.result as { followup: LeadFollowup };
-    const { lead, note } = await this.resolveReply(messageId, from, text);
+    const { lead, note, translated } = await this.resolveReply(messageId, from, text);
     try {
       return await this.repo.transaction(async (tx) => {
         const followup = await this.leads.addFollowupOnTx(tx, lead.id, { action: 'reply', note });
+        if (translated.intent === 'unsubscribe') {
+          await this.repo.addSuppressedOnTx(tx, from, 'unsubscribe-reply', this.now());
+        }
         const claimed = await this.repo.recordCallbackEventOnTx(tx, eventId, 'reply', { followup }, this.now());
         if (!claimed) throw new CallbackReplayError();
         return { followup };
