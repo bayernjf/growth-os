@@ -281,6 +281,11 @@ export class OutreachRepository {
     return this.insertSuppressed(this.driver, email, reason, now);
   }
 
+  /** Suppression receipts are case-insensitive (2026-11-02 review P3-7). */
+  private static normalizeEmail(email: string): string {
+    return email.trim().toLowerCase();
+  }
+
   /** Suppress on an explicit transaction (signed callback atomicity, P2-3). */
   addSuppressedOnTx(tx: StorageTxn, email: string, reason: string, now?: string): Promise<void> {
     return this.insertSuppressed(tx, email, reason, now);
@@ -293,13 +298,14 @@ export class OutreachRepository {
     now?: string,
   ): Promise<void> {
     const ts = now ?? new Date().toISOString();
+    const normalized = OutreachRepository.normalizeEmail(email);
     const existing = await runner.get<{ email: string }>(
-      'SELECT email FROM suppressed_emails WHERE email = ?',
-      [email],
+      'SELECT email FROM suppressed_emails WHERE LOWER(email) = ?',
+      [normalized],
     );
     if (existing) return;
     await runner.run('INSERT INTO suppressed_emails (email, reason, created_at) VALUES (?,?,?)', [
-      email,
+      normalized,
       reason,
       ts,
     ]);
@@ -307,8 +313,8 @@ export class OutreachRepository {
 
   async isSuppressed(email: string): Promise<boolean> {
     const row = await this.driver.get<{ email: string }>(
-      'SELECT email FROM suppressed_emails WHERE email = ?',
-      [email],
+      'SELECT email FROM suppressed_emails WHERE LOWER(email) = ?',
+      [OutreachRepository.normalizeEmail(email)],
     );
     return row !== undefined;
   }

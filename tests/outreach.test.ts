@@ -210,6 +210,30 @@ describe('receipts and suppression (T-G3-05)', () => {
     ]);
   });
 
+  it('matches suppression case-insensitively (2026-11-02 review P3-7)', async () => {
+    const stack = await makeStack();
+    await stack.outreachRepo.addSuppressed('Jane@ACME.com', 'bounce', FIXED_NOW);
+    expect(await stack.outreachRepo.isSuppressed('jane@acme.com')).toBe(true);
+    expect(await stack.outreachRepo.isSuppressed(' JANE@Acme.COM ')).toBe(true);
+    expect(await stack.service.listSuppressed()).toEqual([
+      { email: 'jane@acme.com', reason: 'bounce', createdAt: FIXED_NOW },
+    ]);
+  });
+
+  it('blocks a send when the bounce only differs by case', async () => {
+    const stack = await makeStack();
+    const { lead } = await seedLead(stack.crmRepo);
+    const { drafts } = await stack.service.createCampaign({ name: 'intro' }, [lead.id]);
+    const draft = drafts[0]!;
+    await stack.service.submitDraft(draft.id);
+    (stack.decision as FakeDecisionPort).verdicts['dec_1'] = 'approved';
+    await stack.service.checkApproval(draft.id);
+
+    await stack.service.recordBounce('Jane@ACME.com');
+    await expect(stack.service.sendDraft(draft.id)).rejects.toMatchObject({ code: 'CONFLICT', status: 409 });
+    expect(stack.mail.sent).toHaveLength(0);
+  });
+
   it('records a reply as a lead follow-up for review', async () => {
     const stack = await makeStack();
     const { lead } = await seedLead(stack.crmRepo);

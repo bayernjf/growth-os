@@ -2,14 +2,23 @@
 
 > 状态主入口。开工前先读；每完成一个工作单元立即更新（已完成划掉、待办保留）。
 
-## Current state（2026-11-01，对外运营 M1 销售闭环 OP-10~14/18 已落码，待 PR）
+## Current state（2026-11-04，2026-11-02 评审修复批已落码并过门、已落 dev（未上 main）；此前 M1 销售闭环 OP-10~14/18 已合 main）
 
-- **M1 销售-交付闭环本地核心（OP-10~14、OP-18，分支 feature/sales-m1，未推送）**：
-  - 迁移（双方言，check-migrations 11 对）：`010_sales_quotes`（quotes 行项 JSON/整数分金额/状态 draft→sent→accepted|rejected + quote_events 审计）、`011_sales_contracts_orders`（contracts draft→sent→signed；orders quote→order，delivery_status 预留 OP-15、invoice_ref 预留 OP-16）。
+- **2026-11-02 评审修复批（2026-11-04 落码并过门；已落 dev（未上 main）——`5b32375`/`693e655`/`1513338`/`2ad4d60`/`cf78933`/`19cba25` 经 `git branch -r --contains` 仅命中 `origin/dev`；评审原文见 `docs/reviews/code-review-2026-11-02.md`）**：
+  - `/mcp` 未配置 token 改为 fail-closed 401（`src/api/mcp-http.ts`，提交 `5b32375`）。
+  - 订单号改由数据库序列在插入事务内分配，消除 `countOrders()+1` 并发撞号；新增 `013_orders_contract_unique` 与 `014_order_number_sequence` 双方言迁移（提交 `693e655`）。
+  - `tsconfig.build.json` 排除 `src/**/*.test.ts`，测试文件不再进 `dist/`（提交 `1513338`）。
+  - 抑制名单邮箱匹配大小写归一（`trim().toLowerCase()` + `LOWER(email)`，提交 `2ad4d60`）。
+  - 迁移 DDL 与 `schema_migrations` 记录合并为单事务（`src/storage/migrate.ts`，提交 `cf78933`）。
+  - `README.md` 与本文件更正搜索连接器为 Tavily 风格 `POST /search`（提交 `19cba25`）；同批更早两笔为 malformed JSON 请求体返回 400（提交 `b75441c`，契约测试 `0426fb4`）。
+  - 验证：Node 22.23.4 实跑 `npm test` **31 文件 / 212 用例全绿**（2026-11-04）。
+
+- **M1 销售-交付闭环本地核心（OP-10~14/18 已合 main：`fcbfbbe`/`2232ff7`，`git branch -r --contains` 命中 `origin/main` 与 `origin/dev`）**：
+  - 迁移（双方言，check-migrations 12 对）：`010_sales_quotes`（quotes 行项 JSON/整数分金额/状态 draft→sent→accepted|rejected + quote_events 审计）、`011_sales_contracts_orders`（contracts draft→sent→signed；orders quote→order，delivery_status 预留 OP-15、invoice_ref 预留 OP-16）、`012_order_fulfillment_invoices`（履约状态与发票行，随 PR #9 落地）。
   - `src/sales/`：types（行项/状态机）、repository（双方言 mapRow、状态转换+审计事件同事务、order_no）、sales-service（金额校验：qty 正整数/单价非负/单一币种/总额由行项求和；跨实体门槛——未 accepted 不能建 contract、未 signed 不能建 order；OP-18 createQuoteFromLead）。
   - **zeus 分级（OP-13）**：`SalesDecisionGate`，报价 ≥ `GROWTH_QUOTE_APPROVAL_THRESHOLD_CENTS`（默认 500000=5000.00）走 zeus；低金额零外发 D0 自动；高金额 zeus 不可用即抛 503 fail-closed（RejectingDecisionPort），D2 时 quote 留 draft 挂 decisionId（202 pendingApproval），resolve-approval 见终态再发。
   - HTTP：`/api/v1/sales/{quotes,contracts,orders}` + send/accept/reject/resolve-approval/sign 动作（src/api/sales-http.ts，Bearer 复用 crm-http），serve.ts 装配。
-  - 验证：sales-service 10 例（金额非法、状态机、跨实体门槛、D2 挂起/解决、fail-closed 零外发、lead 转换）+ sales-http 3 例（401/400/409/全链）；全量 **26 文件/178 用例**（+13）五门全绿；守卫回退实测变红。**OP-15/16 跨 agent-dev/agent-world、OP-17 全链 e2e 未做**。
+  - 验证：sales-service 10 例（金额非法、状态机、跨实体门槛、D2 挂起/解决、fail-closed 零外发、lead 转换）+ sales-http 3 例（401/400/409/全链）；全量 **26 文件/178 用例**（+13）五门全绿；守卫回退实测变红。**OP-15/16 已改为本地闭环、OP-17 GATE-W2 全链 e2e 已随 `2232ff7`（PR #9）合 main（`012_order_fulfillment_invoices` 与 `tests/sales-e2e.test.ts` 均在 `origin/main`）；跨 agent-dev/agent-world 的语义匹配版本未采用**。
 
 - **T-G3-07 多语言外联（2026-11-01）已过门**（PR #7 合并 main）：
   - **多语言模板**：src/mail/templates.ts（renderEmailTemplate en/zh，默认 en 按设计 §14.3.3）输出 subject/text/html 三态；html 部分对收件人/线索内容 escapeHtml 防注入；无 compliance 时省略页脚。
@@ -36,9 +45,9 @@
 - **定级**：growth-os 已登记 bayjf `docs/PROJECT-TIER-CONVENTION.md` Tier 0。
 - **注意**：本机默认 shell node 20 跑不了测试（`node:sqlite` 需 22.5+），用 `fnm use 22` 后再跑五门。
 
-- **基线**：24 个测试文件 / **165 用例全绿**；`typecheck` 0 错；`lint` 0 错；`tsc -p tsconfig.build.json` 构建出 `dist/`；sqlite + postgres 迁移各 9 份（`001_research`、`002_crm`、`003_outreach`、`004_outreach`、`005_match`、`006_contact_email`、`007_callback_events`、`008_lead_import`、`009_outreach_locale`，配对）。
+- **基线**：31 个测试文件 / **212 用例全绿**（2026-11-04 Node 22.23.4 实跑）；`typecheck` 0 错；`lint` 0 错；`tsc -p tsconfig.build.json` 构建出 `dist/`；sqlite + postgres 迁移各 14 份（`001_research`、`002_crm`、`003_outreach`、`004_outreach`、`005_match`、`006_contact_email`、`007_callback_events`、`008_lead_import`、`009_outreach_locale`、`010_sales_quotes`、`011_sales_contracts_orders`、`012_order_fulfillment_invoices`、`013_orders_contract_unique`、`014_order_number_sequence`，配对）。
 - **G1 已落码并实测通过**：
-  - 只读搜索连接器 `research/provider/`：`OfflineSearchProvider`（确定性回放 `recordings/search/fixtures.json`，默认）、`OnlineSearchProvider`（Tavily 风格 REST，GET 只读）、`registry`（online 缺凭据 → 拒绝型 provider，run 返回 422，**不静默回退离线**）。
+  - 只读搜索连接器 `research/provider/`：`OfflineSearchProvider`（确定性回放 `recordings/search/fixtures.json`，默认）、`OnlineSearchProvider`（Tavily 风格 REST，POST /search 只读）、`registry`（online 缺凭据 → 拒绝型 provider，run 返回 422，**不静默回退离线**）。
   - 信号引擎：`collector.ts`（规范化 + 指纹去重，指纹 = sha256(规范化 URL) 截 16）、`scoring.ts`（0–100 确定性打分，类型/来源/新鲜度/关键词四项加权，分项可解释，新鲜度半衰期 30 天、无日期取中性 0.5）。
   - 洞察：`insights.ts`（need/pain/comparison 且 score≥60 才聚类，按"类别+首个命中关键词"分组，全部 `pending_review`）；人审 `confirm/reject`，非 pending 重复裁决 → 409。
   - 报告：`report.ts`（stats/Top/洞察/markdown，重 run 版本 v1→v2→v3 不覆盖，离线带"离线演示数据"水印）。
@@ -102,7 +111,7 @@
 - T-G5-05 撮合闭环 + GATE-G5：`match-e2e.test.ts` 需求信号+货源信号→撮合；真实服务冒烟 8/8。
 - 撮合联系（FR-22）：`MatchService.buildIntroduction` 生成撮合介绍 + `contactMatch` 路由到 outreach（撮合实体 email → 自动建 contact/lead/campaign/draft，缺 email 回退 ownerEmail）；`006_contact_email` 迁移加 email 列 + structurer extractEmail；`OutreachService.createContactDraft` 直接指定收件人建草稿。
 
-## 测试覆盖（tests/，24 文件 / 165 用例）
+## 测试覆盖（tests/，31 文件 / 212 用例）
 
 - `outreach-http.test.ts`（11）：回调 secret 未配置 fail-closed 401、缺签/错签/错钥 401 且零副作用、签名退信 suppress + eventId 重放幂等、缺 eventId 400、签名回复回流单条 followup + 重放返回首次结果、未知 messageId 404；T-G3-07：campaign locale 合法 201/非法 400、退订端点缺 secret 422、有效 token 幂等 suppress、无效 token 400 零副作用、/pub/v1 无 Bearer 公开。
 - `boot.test.ts`（10）：GROWTH_API_TOKEN 缺失/空串拒启、配置正常、姿态行 set/unset 与模式映射；T-G3-07 assertMailCompliance：off 放行、smtp 缺 identity/baseUrl/secret 各拒启、全配放行。

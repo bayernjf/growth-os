@@ -54,6 +54,10 @@ export class SqliteDriver implements StorageDriver {
         const result = this.db.prepare(sql).run(...(params as SQLInputValue[]));
         return Promise.resolve({ changes: Number(result.changes ?? 0) });
       },
+      exec: (sql) => {
+        this.db.exec(sql);
+        return Promise.resolve();
+      },
     };
     this.db.exec('BEGIN IMMEDIATE');
     try {

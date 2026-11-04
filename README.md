@@ -19,7 +19,7 @@ commerce-os), autonomous sending, self-built models.
 ## G1 in one loop
 
 ```
-ResearchTopic ──▶ SearchProvider (offline fixtures | online Tavily-style GET)
+ResearchTopic ──▶ SearchProvider (offline fixtures | online Tavily-style POST /search)
                       │ read-only
                       ▼
         collect + fingerprint dedupe
@@ -78,8 +78,9 @@ the database or committed.
 
 `GROWTH_API_TOKEN` is required: the server refuses to boot without it, and
 every `/api/v1/*` route then demands `Authorization: Bearer <token>` compared
-in constant time (Tier0 review 2026-10-30 H1). The MCP endpoint `/mcp` uses
-`GROWTH_MCP_TOKEN` when set. The boot log prints the active auth posture.
+in constant time (Tier0 review 2026-10-30 H1). The MCP endpoint `/mcp` requires
+`GROWTH_MCP_TOKEN`: when it is unset every request is rejected (fail-closed).
+The boot log prints the active auth posture.
 
 ## Layout
 

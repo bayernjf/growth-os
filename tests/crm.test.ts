@@ -204,6 +204,7 @@ class FailingEventDriver implements StorageDriver {
           }
           return tx.run(sql, params);
         },
+        exec: (sql) => tx.exec(sql),
       }),
     );
   }

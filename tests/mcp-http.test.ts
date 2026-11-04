@@ -6,14 +6,21 @@ import { createMcpApp } from '../src/api/mcp-http.js';
 // 2026-10-30 H3: the branch went red because typecheck never ran on it).
 type FollowupSource = { listDueFollowups: () => Promise<unknown[]> };
 
-function app(service: FollowupSource = { listDueFollowups: async () => [] }) {
-  return createMcpApp({ service: service as never });
+function app(service: FollowupSource = { listDueFollowups: async () => [] }, mcpToken: string | undefined = 'tok') {
+  return createMcpApp({ service: service as never, mcpToken });
 }
 
-async function rpc(a: ReturnType<typeof app>, body: Record<string, unknown>) {
+async function rpc(
+  a: ReturnType<typeof app>,
+  body: Record<string, unknown>,
+  token: string | undefined = 'tok',
+) {
   const res = await a.request('/mcp', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
     body: JSON.stringify(body),
   });
   return { status: res.status, body: (await res.json()) as Record<string, unknown> };
@@ -86,16 +93,25 @@ describe('mcp streamable-http server', () => {
     }
   });
 
-  it('enforces the mcp token when configured', async () => {
-    const guarded = createMcpApp({
+  it('fails closed when no mcp token is configured (P2-2)', async () => {
+    const open = createMcpApp({
       service: { listDueFollowups: async () => [] } as never,
-      mcpToken: 'tok',
+      mcpToken: undefined,
     });
-    const res = await guarded.request('/mcp', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
-    });
-    expect(res.status).toBe(401);
+    const { status, body } = await rpc(open, { jsonrpc: '2.0', id: 1, method: 'tools/list' }, undefined);
+    expect(status).toBe(401);
+    expect(body.error).toMatchObject({ code: -32001, message: expect.stringContaining('not configured') });
+  });
+
+  it('rejects a wrong mcp token', async () => {
+    const { status } = await rpc(app(), { jsonrpc: '2.0', id: 1, method: 'tools/list' }, 'wrong');
+    expect(status).toBe(401);
+  });
+
+  it('accepts the configured mcp token', async () => {
+    const { status, body } = await rpc(app(), { jsonrpc: '2.0', id: 1, method: 'tools/list' }, 'tok');
+    expect(status).toBe(200);
+    const tools = (body.result as { tools: Array<{ name: string }> }).tools;
+    expect(tools.map((t) => t.name)).toEqual(['crm.listDueFollowups']);
   });
 });

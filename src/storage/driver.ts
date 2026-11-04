@@ -11,12 +11,12 @@ export interface StorageTxn {
   all<T>(sql: string, params?: readonly unknown[]): Promise<T[]>;
   get<T>(sql: string, params?: readonly unknown[]): Promise<T | undefined>;
   run(sql: string, params?: readonly unknown[]): Promise<{ changes: number }>;
+  /** Raw multi-statement execution, so migrations can commit DDL atomically. */
+  exec(sql: string): Promise<void>;
 }
 
 export interface StorageDriver extends StorageTxn {
   readonly dialect: 'sqlite' | 'postgres';
-  /** Raw multi-statement execution (migrations only). */
-  exec(sql: string): Promise<void>;
   /**
    * Run `fn` in one transaction: commit when it returns, roll back when it
    * throws. Nested transactions are not supported.
