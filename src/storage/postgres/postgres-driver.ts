@@ -109,6 +109,9 @@ export class PostgresDriver implements StorageDriver {
         const result = await client.query(text, [...params]);
         return { changes: result.rowCount };
       },
+      exec: async (sql) => {
+        await client.query(sql);
+      },
     };
     try {
       await client.query('BEGIN');

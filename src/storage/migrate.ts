@@ -42,8 +42,10 @@ export async function migrationStatus(driver: StorageDriver): Promise<MigrationS
 }
 
 /**
- * Apply all pending migrations in filename order. DDL is IF NOT EXISTS
- * idempotent; each applied file is recorded after its DDL succeeds.
+ * Apply all pending migrations in filename order. Each file's DDL and its
+ * schema_migrations row commit in one transaction (2026-11-02 review P3-8),
+ * so a crash or recording failure rolls the DDL back and the next run can
+ * retry it instead of finding a half-applied schema.
  */
 export async function migrateUp(driver: StorageDriver): Promise<string[]> {
   const appliedNow: string[] = [];
@@ -52,11 +54,13 @@ export async function migrateUp(driver: StorageDriver): Promise<string[]> {
   const files = listMigrationFiles(driver.dialect);
   for (const file of files) {
     if (!status.pending.includes(file.version)) continue;
-    await driver.exec(file.sql);
-    await driver.run(
-      'INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)',
-      [file.version, new Date().toISOString()],
-    );
+    await driver.transaction(async (tx) => {
+      await tx.exec(file.sql);
+      await tx.run(
+        'INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)',
+        [file.version, new Date().toISOString()],
+      );
+    });
     appliedNow.push(file.version);
   }
   return appliedNow;
