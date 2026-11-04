@@ -13,12 +13,12 @@
   - `README.md` 与本文件更正搜索连接器为 Tavily 风格 `POST /search`（提交 `19cba25`）；同批更早两笔为 malformed JSON 请求体返回 400（提交 `b75441c`，契约测试 `0426fb4`）。
   - 验证：Node 22.23.4 实跑 `npm test` **31 文件 / 212 用例全绿**（2026-11-04）。
 
-- **M1 销售-交付闭环本地核心（OP-10~14、OP-18，分支 feature/sales-m1，未推送）**：
-  - 迁移（双方言，check-migrations 11 对）：`010_sales_quotes`（quotes 行项 JSON/整数分金额/状态 draft→sent→accepted|rejected + quote_events 审计）、`011_sales_contracts_orders`（contracts draft→sent→signed；orders quote→order，delivery_status 预留 OP-15、invoice_ref 预留 OP-16）。
+- **M1 销售-交付闭环本地核心（OP-10~14/18 已合 main：`fcbfbbe`/`2232ff7`，`git branch -r --contains` 命中 `origin/main` 与 `origin/dev`）**：
+  - 迁移（双方言，check-migrations 12 对）：`010_sales_quotes`（quotes 行项 JSON/整数分金额/状态 draft→sent→accepted|rejected + quote_events 审计）、`011_sales_contracts_orders`（contracts draft→sent→signed；orders quote→order，delivery_status 预留 OP-15、invoice_ref 预留 OP-16）、`012_order_fulfillment_invoices`（履约状态与发票行，随 PR #9 落地）。
   - `src/sales/`：types（行项/状态机）、repository（双方言 mapRow、状态转换+审计事件同事务、order_no）、sales-service（金额校验：qty 正整数/单价非负/单一币种/总额由行项求和；跨实体门槛——未 accepted 不能建 contract、未 signed 不能建 order；OP-18 createQuoteFromLead）。
   - **zeus 分级（OP-13）**：`SalesDecisionGate`，报价 ≥ `GROWTH_QUOTE_APPROVAL_THRESHOLD_CENTS`（默认 500000=5000.00）走 zeus；低金额零外发 D0 自动；高金额 zeus 不可用即抛 503 fail-closed（RejectingDecisionPort），D2 时 quote 留 draft 挂 decisionId（202 pendingApproval），resolve-approval 见终态再发。
   - HTTP：`/api/v1/sales/{quotes,contracts,orders}` + send/accept/reject/resolve-approval/sign 动作（src/api/sales-http.ts，Bearer 复用 crm-http），serve.ts 装配。
-  - 验证：sales-service 10 例（金额非法、状态机、跨实体门槛、D2 挂起/解决、fail-closed 零外发、lead 转换）+ sales-http 3 例（401/400/409/全链）；全量 **26 文件/178 用例**（+13）五门全绿；守卫回退实测变红。**OP-15/16 跨 agent-dev/agent-world、OP-17 全链 e2e 未做**。
+  - 验证：sales-service 10 例（金额非法、状态机、跨实体门槛、D2 挂起/解决、fail-closed 零外发、lead 转换）+ sales-http 3 例（401/400/409/全链）；全量 **26 文件/178 用例**（+13）五门全绿；守卫回退实测变红。**OP-15/16 已改为本地闭环、OP-17 GATE-W2 全链 e2e 已随 `2232ff7`（PR #9）合 main（`012_order_fulfillment_invoices` 与 `tests/sales-e2e.test.ts` 均在 `origin/main`）；跨 agent-dev/agent-world 的语义匹配版本未采用**。
 
 - **T-G3-07 多语言外联（2026-11-01）已过门**（PR #7 合并 main）：
   - **多语言模板**：src/mail/templates.ts（renderEmailTemplate en/zh，默认 en 按设计 §14.3.3）输出 subject/text/html 三态；html 部分对收件人/线索内容 escapeHtml 防注入；无 compliance 时省略页脚。
