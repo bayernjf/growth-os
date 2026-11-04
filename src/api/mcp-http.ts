@@ -22,14 +22,21 @@ export function createMcpApp(deps: McpAppDeps): Hono {
   app.onError(growthOnError);
 
   app.post('/mcp', async (c) => {
-    if (deps.mcpToken) {
-      const header = c.req.header('Authorization') ?? '';
-      if (!secureEqual(header, `Bearer ${deps.mcpToken}`)) {
-        return c.json(
-          { jsonrpc: '2.0', id: null, error: { code: -32001, message: 'unauthorized' } },
-          401,
-        );
-      }
+    // Fail-closed (2026-11-02 review P2-2): an unconfigured token disables the
+    // endpoint outright instead of exposing CRM followups (which carry reply
+    // text) to anonymous callers.
+    if (!deps.mcpToken) {
+      return c.json(
+        { jsonrpc: '2.0', id: null, error: { code: -32001, message: 'unauthorized: GROWTH_MCP_TOKEN is not configured' } },
+        401,
+      );
+    }
+    const header = c.req.header('Authorization') ?? '';
+    if (!secureEqual(header, `Bearer ${deps.mcpToken}`)) {
+      return c.json(
+        { jsonrpc: '2.0', id: null, error: { code: -32001, message: 'unauthorized' } },
+        401,
+      );
     }
 
     const body = (await c.req.json().catch(() => null)) as {
