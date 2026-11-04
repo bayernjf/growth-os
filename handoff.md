@@ -2,9 +2,9 @@
 
 > 状态主入口。开工前先读；每完成一个工作单元立即更新（已完成划掉、待办保留）。
 
-## Current state（2026-11-04，2026-11-02 评审修复批已落码并过门；此前 M1 销售闭环 OP-10~14/18 已合 main）
+## Current state（2026-11-04，2026-11-02 评审修复批已落码并过门、已落 dev（未上 main）；此前 M1 销售闭环 OP-10~14/18 已合 main）
 
-- **2026-11-02 评审修复批（2026-11-04 落码并过门；评审原文见 `docs/reviews/code-review-2026-11-02.md`）**：
+- **2026-11-02 评审修复批（2026-11-04 落码并过门；已落 dev（未上 main）——`5b32375`/`693e655`/`1513338`/`2ad4d60`/`cf78933`/`19cba25` 经 `git branch -r --contains` 仅命中 `origin/dev`；评审原文见 `docs/reviews/code-review-2026-11-02.md`）**：
   - `/mcp` 未配置 token 改为 fail-closed 401（`src/api/mcp-http.ts`，提交 `5b32375`）。
   - 订单号改由数据库序列在插入事务内分配，消除 `countOrders()+1` 并发撞号；新增 `013_orders_contract_unique` 与 `014_order_number_sequence` 双方言迁移（提交 `693e655`）。
   - `tsconfig.build.json` 排除 `src/**/*.test.ts`，测试文件不再进 `dist/`（提交 `1513338`）。
