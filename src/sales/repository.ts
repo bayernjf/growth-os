@@ -2,7 +2,7 @@
 // orders. State transitions and their audit events are written in one
 // transaction (same discipline as CrmRepository.transitionLeadStatus).
 
-import type { StorageDriver } from '../storage/driver.js';
+import type { StorageDriver, StorageTxn } from '../storage/driver.js';
 import { newId } from '../util/hash.js';
 import type {
   Contract,
@@ -289,17 +289,20 @@ export class SalesRepository {
 
   // ---------- orders ----------
 
-  async insertOrder(input: {
-    id: string;
-    orderNo: string;
-    quoteId: string;
-    contractId?: string;
-    amountCents: number;
-    currency: string;
-    note: string;
-    now: string;
-  }): Promise<Order> {
-    await this.driver.run(
+  private insertOrderRow(
+    runner: StorageTxn,
+    input: {
+      id: string;
+      orderNo: string;
+      quoteId: string;
+      contractId?: string;
+      amountCents: number;
+      currency: string;
+      note: string;
+      now: string;
+    },
+  ): Promise<{ changes: number }> {
+    return runner.run(
       `INSERT INTO orders
         (id,order_no,quote_id,contract_id,amount_cents,currency,delivery_status,note,created_at,updated_at)
        VALUES (?,?,?,?,?,?,'pending',?,?,?)`,
@@ -315,10 +318,70 @@ export class SalesRepository {
         input.now,
       ],
     );
+  }
+
+  async insertOrder(input: {
+    id: string;
+    orderNo: string;
+    quoteId: string;
+    contractId?: string;
+    amountCents: number;
+    currency: string;
+    note: string;
+    now: string;
+  }): Promise<Order> {
+    await this.insertOrderRow(this.driver, input);
     return this.getOrder(input.id).then((o) => {
       if (!o) throw new Error(`order ${input.id} vanished after insert`);
       return o;
     });
+  }
+
+  /**
+   * Allocate the next order number and insert the order in one transaction
+   * (2026-11-02 review P2-4). The sequence row bump takes a write lock, so
+   * concurrent writers see increasing values instead of the same COUNT(*)+1;
+   * orders.order_no UNIQUE remains the final backstop.
+   */
+  async insertOrderWithNextNo(input: {
+    id: string;
+    quoteId: string;
+    contractId?: string;
+    amountCents: number;
+    currency: string;
+    note: string;
+    now: string;
+  }): Promise<Order> {
+    // sqlite allows a single writer: losing the lock or the order_no UNIQUE
+    // race is retryable, and the next attempt re-reads the sequence.
+    const isRetryable = (error: unknown): boolean =>
+      /database is locked|SQLITE_BUSY|cannot start a transaction within a transaction|UNIQUE constraint failed: orders\.order_no/.test(
+        String(error),
+      );
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await this.driver.transaction(async (tx) => {
+          await tx.run(
+            `INSERT INTO order_number_sequence (name,next_value) VALUES ('order',0)
+             ON CONFLICT (name) DO NOTHING`,
+          );
+          await tx.run('UPDATE order_number_sequence SET next_value = next_value + 1 WHERE name = ?', ['order']);
+          const counter = await tx.get<{ next_value: number }>(
+            'SELECT next_value FROM order_number_sequence WHERE name = ?',
+            ['order'],
+          );
+          if (!counter) throw new Error('order number sequence row is missing');
+          const orderNo = `ORD-${String(Number(counter.next_value)).padStart(5, '0')}`;
+          await this.insertOrderRow(tx, { ...input, orderNo });
+          const row = await tx.get<OrderRow>('SELECT * FROM orders WHERE id = ?', [input.id]);
+          if (!row) throw new Error(`order ${input.id} vanished after insert`);
+          return this.mapOrder(row);
+        });
+      } catch (error) {
+        if (attempt >= 10 || !isRetryable(error)) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 5 * attempt));
+      }
+    }
   }
 
   async getOrder(id: string): Promise<Order | undefined> {

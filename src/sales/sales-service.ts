@@ -219,19 +219,16 @@ export class SalesService {
     // the backstop so a lost race fails instead of duplicating money.
     const existingForContract = await this.repo.findOrderByContract(contractId);
     if (existingForContract) throw Errors.conflict(`contract ${contractId} already has order ${existingForContract.id}`);
-    const orderNo = `ORD-${String((await this.repo.countOrders()) + 1).padStart(5, '0')}`;
-    const dup = await this.repo.findOrderByNo(orderNo);
-    if (dup) throw Errors.conflict(`order number ${orderNo} already exists`);
-    const now = this.now();
-    return this.repo.insertOrder({
+    // The database allocates the number under a write lock (migration 014);
+    // a lost race fails on orders.order_no UNIQUE instead of duplicating.
+    return this.repo.insertOrderWithNextNo({
       id: newId('order'),
-      orderNo,
       quoteId: quote.id,
       contractId: contract.id,
       amountCents: quote.amountCents,
       currency: quote.currency,
       note,
-      now,
+      now: this.now(),
     });
   }
 
