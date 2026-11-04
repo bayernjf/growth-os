@@ -19,7 +19,7 @@ commerce-os), autonomous sending, self-built models.
 ## G1 in one loop
 
 ```
-ResearchTopic ──▶ SearchProvider (offline fixtures | online Tavily-style GET)
+ResearchTopic ──▶ SearchProvider (offline fixtures | online Tavily-style POST /search)
                       │ read-only
                       ▼
         collect + fingerprint dedupe

@@ -38,7 +38,7 @@
 
 - **基线**：24 个测试文件 / **165 用例全绿**；`typecheck` 0 错；`lint` 0 错；`tsc -p tsconfig.build.json` 构建出 `dist/`；sqlite + postgres 迁移各 9 份（`001_research`、`002_crm`、`003_outreach`、`004_outreach`、`005_match`、`006_contact_email`、`007_callback_events`、`008_lead_import`、`009_outreach_locale`，配对）。
 - **G1 已落码并实测通过**：
-  - 只读搜索连接器 `research/provider/`：`OfflineSearchProvider`（确定性回放 `recordings/search/fixtures.json`，默认）、`OnlineSearchProvider`（Tavily 风格 REST，GET 只读）、`registry`（online 缺凭据 → 拒绝型 provider，run 返回 422，**不静默回退离线**）。
+  - 只读搜索连接器 `research/provider/`：`OfflineSearchProvider`（确定性回放 `recordings/search/fixtures.json`，默认）、`OnlineSearchProvider`（Tavily 风格 REST，POST /search 只读）、`registry`（online 缺凭据 → 拒绝型 provider，run 返回 422，**不静默回退离线**）。
   - 信号引擎：`collector.ts`（规范化 + 指纹去重，指纹 = sha256(规范化 URL) 截 16）、`scoring.ts`（0–100 确定性打分，类型/来源/新鲜度/关键词四项加权，分项可解释，新鲜度半衰期 30 天、无日期取中性 0.5）。
   - 洞察：`insights.ts`（need/pain/comparison 且 score≥60 才聚类，按"类别+首个命中关键词"分组，全部 `pending_review`）；人审 `confirm/reject`，非 pending 重复裁决 → 409。
   - 报告：`report.ts`（stats/Top/洞察/markdown，重 run 版本 v1→v2→v3 不覆盖，离线带"离线演示数据"水印）。
