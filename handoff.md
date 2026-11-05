@@ -83,7 +83,7 @@
 - T-G1-09 编排 + HTTP API + serve 装配
 - T-G1-10 端到端契约 + GATE-G1（离线全链路 / online 422 反证 / 五门）
 
-### G2（T-G2-01 ~ T-G2-05 完成；T-G2-06 已拍板：跳过）
+### G2（T-G2-01 ~ T-G2-05 完成；T-G2-06 已拍板：跳过；T-G2-07 跨境增量 J3 已完成）
 
 - T-G2-01 lead/contact 模型 + `002_crm` 双方言迁移（4 表）
 - T-G2-02 线索来源管道（intent 信号→lead，评分画像继承）
@@ -91,6 +91,7 @@
 - T-G2-04 跟进时间线（followups + 下一步动作 + 来源证据）
 - T-G2-05 回访 watch（WatchPort + LocalWatch 本地桩；真实化 2026-10-27 复核挂账，见「待办」）
 - T-G2-06 外部 CRM 单向同步（已拍板：跳过，用自带 CRM；G4 再评估）
+- T-G2-07 询盘/线索通用导入口（跨境增量 J3，2026-11-01 完成）：`src/crm/lead-import.ts` + `lead-service.ts importLead` + `008_lead_import` 双方言迁移；webhook/CSV/手工三通道 + source 标记，`lead-import.test.ts` / `lead-import-http.test.ts` 覆盖
 
 ### G3（T-G3-01~07 全部完成；GATE-G3 已过门，T-G3-07 为追加批次）
 
@@ -146,6 +147,7 @@
 - [x] GATE-G3：已过门（2026-10-25，57 用例 + 真实服务冒烟 7/7 零外发强反证）。
 - [x] G3 邮件触达（T-G3-01~06 全部完成，默认 D2；强制执行设计方案 §14.2 邮件合规）。
 - [x] T-G3-07 跨境增量 J4 多语言外联（2026-11-01 拍板，同日落码并过门；PR #7 合并 main，24 文件 / 165 用例 + 真实启动冒烟）。
+- [x] T-G2-07 跨境增量 J3 线索通用导入口（2026-11-01 拍板落码过门；`lead-import.ts` + 迁移 008 + `lead-import.test.ts` / `lead-import-http.test.ts`）。
 - [x] GATE-G5：已过门（2026-10-25，81 用例 + 真实服务冒烟 7/7 撮合闭环）。
 - [x] G5 撮合引擎（T-G5-01~05 全部完成：数据模型/结构化/匹配/API/闭环）。
 - [ ] G4 运营化（外部依赖：真实云/域名/密钥/合规；含 SPF/DKIM/DMARC 与跨境数据评估）。
