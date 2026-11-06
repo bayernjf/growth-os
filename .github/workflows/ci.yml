@@ -38,6 +38,15 @@ jobs:
         run: npm run build
       - name: Verify paired migrations (sqlite + postgres)
         run: npm run check:migrations
+      - name: "Postgres migration preflight (skip when no database secret)"
+        env:
+          DATABASE_URL: ${{ secrets.GROWTH_DATABASE_URL }}
+        run: |
+          if [ -z "${DATABASE_URL:-}" ]; then
+            echo "GROWTH_DATABASE_URL is not configured; skipping the Postgres preflight."
+            exit 0
+          fi
+          npm run migrate:pg:status
       - name: Typecheck
         run: npm run typecheck
       - name: Lint
