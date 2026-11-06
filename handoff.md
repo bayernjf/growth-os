@@ -2,7 +2,35 @@
 
 > **2026-11-06 补登：dev → main 已于 2026-11-05 经 PR #12 合并（合并前 CI 全绿）；实测 origin/main 与 origin/dev 内容完全一致（git diff 为空）。**
 
+> **2026-11-06 上线四件套（代码侧可做部分）**：`package.json` 补 `pg@^8` 运行时依赖（不装 `@types/pg`：`src/storage/postgres/postgres-driver.ts` 保留结构化类型 + `@ts-expect-error`，装了反而会因指令未使用而 typecheck 失败）；014 双方言复核为天然幂等（`CREATE TABLE IF NOT EXISTS` + `INSERT OR IGNORE` / `ON CONFLICT DO NOTHING`），未改动；新增 `scripts/fix-sequence-seeds.sql`（`order_number_sequence` 按 `MAX(order_no)` 只上调、`growth_event_sequence` 条件 `setval`、含预检与逐条验收查询）。验证：迁移配对 14 对、typecheck、lint、31 文件/212 用例、build 全绿；`migrate:pg:status` 已能走到连接阶段（无库时为 `ECONNREFUSED`）。生产仍待人工：停服 → 跑 014 → 执行该 SQL → 配 `GROWTH_MCP_TOKEN`。
+
+> **2026-11-06 加固补登**：`scripts/migrate.mjs` 的 Postgres 连接失败改为带错误码与修复建议的可读提示（不再裸抛 `ECONNREFUSED`）；CI 新增 `migrate:pg:status` 预检步骤，无 `GROWTH_DATABASE_URL` 时跳过而非失败；新增 `scripts/preflight-014-order-sequence.sql`，并在下方补 014 执行前预检与回滚预案。
+
 > 状态主入口。开工前先读；每完成一个工作单元立即更新（已完成划掉、待办保留）。
+
+## 014_order_number_sequence 执行前预检与回滚预案（2026-11-06）
+
+**执行前预检**（只读，停服窗口内先跑）：
+
+1. 跑 `scripts/preflight-014-order-sequence.sql`（Postgres；SQLite 用文末等价查询）。
+2. P0 看 `011/013/014` 的 `schema_migrations` 记录；P5a 判断账本与 `order_number_sequence` 是否一致；P5b 判断种子值与 `MAX(order_no)`。
+3. 判定口径：`next_value == max_order_seq` 健康（下一次分配 = max + 1）；`>` 只会跳号，安全；`<` 为污染，下一次分配迟早撞上已有单号。
+4. `growth_event_sequence` 不是本仓迁移创建的对象：P6 只确认存在性与当前值；归属表确认前不要 `setval`。
+
+**序列污染的判断与修复**：
+
+- `order_number_sequence.next_value < MAX(order_no 的 ORD- 数字后缀)` → 污染（014 用 `COUNT(*)` 播种，删单/跳号后会偏小）。
+- `orders.order_no` 出现重复行（011 的 UNIQUE 本应阻止）→ 先查是否曾绕过约束写入。
+- `order_no` 不符合 `ORD-<数字>` → 预检单列 malformed 计数，不参与 MAX 计算。
+- 修复只允许上调：`scripts/fix-sequence-seeds.sql` 用 `GREATEST`，重复执行不降值；修完重跑 P5b 应为 `OK`。
+
+**回滚预案**：
+
+- 014 仅新增 `order_number_sequence` 表与种子行，未改 `orders` schema，因此回滚不涉及订单数据。
+- 应用尚未切到序列分配时：停服 → `DROP TABLE IF EXISTS order_number_sequence;` → 删除 `schema_migrations` 的 `014_order_number_sequence` 行（同事务）→ 重启并确认 `/healthz`。SQLite 等价：`DROP TABLE IF EXISTS order_number_sequence; DELETE FROM schema_migrations WHERE version = '014_order_number_sequence';`
+- 应用已经用序列分配过订单时：**不要 drop 表**。回退代码到 `COUNT(*)+1` 会重新引入并发/删单撞号；优先前滚（保留表 + 上调种子）。若业务强制回退，先记录 `next_value`，回退后以 `MAX(order_no)` 监控撞号，并把 014 视为不可回滚。
+- 013（`idx_orders_contract_unique` 部分唯一索引）与 014 独立；若该索引写入时报冲突，说明确有历史重复，先清数据再谈回滚。
+- 任何情况下都不要 `DROP TABLE orders`。
 
 ## Current state（2026-11-04，2026-11-02 评审修复批已落码并过门、已落 dev（未上 main）；此前 M1 销售闭环 OP-10~14/18 已合 main）
 
