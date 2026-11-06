@@ -2,6 +2,8 @@
 
 > **2026-11-06 补登：dev → main 已于 2026-11-05 经 PR #12 合并（合并前 CI 全绿）；实测 origin/main 与 origin/dev 内容完全一致（git diff 为空）。**
 
+> **2026-11-06 上线四件套（代码侧可做部分）**：`package.json` 补 `pg@^8` 运行时依赖（不装 `@types/pg`：`src/storage/postgres/postgres-driver.ts` 保留结构化类型 + `@ts-expect-error`，装了反而会因指令未使用而 typecheck 失败）；014 双方言复核为天然幂等（`CREATE TABLE IF NOT EXISTS` + `INSERT OR IGNORE` / `ON CONFLICT DO NOTHING`），未改动；新增 `scripts/fix-sequence-seeds.sql`（`order_number_sequence` 按 `MAX(order_no)` 只上调、`growth_event_sequence` 条件 `setval`、含预检与逐条验收查询）。验证：迁移配对 14 对、typecheck、lint、31 文件/212 用例、build 全绿；`migrate:pg:status` 已能走到连接阶段（无库时为 `ECONNREFUSED`）。生产仍待人工：停服 → 跑 014 → 执行该 SQL → 配 `GROWTH_MCP_TOKEN`。
+
 > 状态主入口。开工前先读；每完成一个工作单元立即更新（已完成划掉、待办保留）。
 
 ## Current state（2026-11-04，2026-11-02 评审修复批已落码并过门、已落 dev（未上 main）；此前 M1 销售闭环 OP-10~14/18 已合 main）
