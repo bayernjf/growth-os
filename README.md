@@ -35,7 +35,7 @@ ResearchTopic ──▶ SearchProvider (offline fixtures | online Tavily-style P
 
 - **Read-only**: no login, no third-party writes, no email, no transactions.
 - **Offline by default**: deterministic replay of `recordings/search/fixtures.json`,
-  so the whole loop runs with zero credentials and no network.
+  so the research loop needs no external search credentials and no network.
 - **Fail-closed online**: `GROWTH_SEARCH_MODE=online` without
   `GROWTH_SEARCH_BASE_URL`/`GROWTH_SEARCH_API_KEY` makes a run return HTTP 422,
   never silently offline.
@@ -48,12 +48,16 @@ ResearchTopic ──▶ SearchProvider (offline fixtures | online Tavily-style P
 npm install
 npm run build
 npm run migrate:up          # creates ./data/growth-os.db (sqlite)
+cp .env.example .env        # set GROWTH_API_TOKEN (required; boot is fail-closed)
 npm start                   # http://127.0.0.1:8788, GROWTH_SEARCH_MODE=offline
 
-# quick loop
-curl -X POST localhost:8788/api/v1/research/topics -H 'content-type: application/json' \
+# quick loop (every /api/v1 route requires the bearer token)
+TOKEN=<value of GROWTH_API_TOKEN>
+curl -X POST localhost:8788/api/v1/research/topics \
+  -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
   -d '{"title":"AI CRM demand","keywords":["ai crm","outreach"],"signalTypes":["need","pain","comparison","trend"]}'
-curl -X POST localhost:8788/api/v1/research/run -H 'content-type: application/json' \
+curl -X POST localhost:8788/api/v1/research/run \
+  -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
   -d '{"topicId":"<topic_id>"}'
 ```
 
