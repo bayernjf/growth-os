@@ -46,9 +46,9 @@ export interface AuthPosture {
   /** HMAC secret for one-click unsubscribe tokens (T-G3-07). */
   unsubscribe: 'set' | 'unset';
   /**
-   * Bearer guard on /mcp (2026-11-02 review P2-2). 'unset' is the documented
-   * open-for-localhost default (.env.example); it is surfaced here so an
-   * operator binding GROWTH_HOST beyond loopback can spot the open endpoint.
+   * Bearer guard on /mcp (2026-11-02 review P2-2). 'unset' disables the
+   * endpoint (fail-closed, 401) and is surfaced here so an operator can see
+   * that the MCP surface is closed.
    */
   mcp: 'set' | 'unset';
   search: 'offline' | 'online';
