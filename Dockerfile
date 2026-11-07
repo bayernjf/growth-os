@@ -19,9 +19,12 @@ COPY package.json package-lock.json ./
 COPY --from=zeusclient ./ /zeus/packages/zeus-client/
 COPY --from=modelkit ./ /model-hub/packages/model-kit/
 
-# --ignore-scripts: model-kit's prepare hook would run tsc before the
-# dependency tree is linked; both packages are built explicitly below instead.
-RUN npm ci --ignore-scripts
+# npm runs the `prepare` script of file: dependencies even with
+# --ignore-scripts, and model-kit's prepare calls tsc before the dependency
+# tree exists in a clean checkout (CI has no node_modules to borrow). Strip it
+# from the build copy; both sibling packages are built explicitly below.
+RUN node -e "const fs=require('fs'); const p='/model-hub/packages/model-kit/package.json'; const j=JSON.parse(fs.readFileSync(p,'utf8')); delete j.scripts.prepare; fs.writeFileSync(p, JSON.stringify(j,null,2)+'\n');" \
+ && npm ci --ignore-scripts
 
 # The sibling packages publish dist/ through their exports, so compile them
 # before growth-os. Link node_modules into each package so their tsconfigs
