@@ -1,0 +1,14 @@
+node_modules
+dist
+data
+recordings/**/*.test.ts
+tests
+coverage
+.env
+.env.*
+.git
+.gitignore
+.github
+docs
+*.log
+.DS_Store
