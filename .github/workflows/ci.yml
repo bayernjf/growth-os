@@ -53,3 +53,66 @@ jobs:
         run: npm run lint
       - name: Unit + contract tests
         run: npm test
+
+  # Container smoke (2026-11-07): the image must build, the process must come
+  # up, and the boot-time migration runner must apply the paired migrations.
+  # Mirrors the sibling Tier 0 image shape (growth-agent / model-hub) without
+  # publishing anywhere: deployment still needs a target host and credentials.
+  docker-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: "Clone sibling packages for the Docker build contexts"
+        run: |
+          ZEUS_DIR="$GITHUB_WORKSPACE/../zeus"
+          MODEL_HUB_DIR="$GITHUB_WORKSPACE/../model-hub"
+          git clone --depth 1 https://github.com/${{ github.repository_owner }}/zeus.git "$ZEUS_DIR"
+          git clone --depth 1 https://github.com/${{ github.repository_owner }}/model-hub.git "$MODEL_HUB_DIR"
+
+      - name: Build image
+        run: |
+          docker build \
+            --build-context zeusclient="$GITHUB_WORKSPACE/../zeus/packages/zeus-client" \
+            --build-context modelkit="$GITHUB_WORKSPACE/../model-hub/packages/model-kit" \
+            -t growth-os:ci .
+
+      - name: "Boot smoke: process starts and migrations apply"
+        run: |
+          set -euo pipefail
+          docker run -d --name growth-os-ci \
+            -p 127.0.0.1:18788:8788 \
+            -e GROWTH_API_TOKEN=ci-smoke-token \
+            -e GROWTH_HOST=0.0.0.0 \
+            growth-os:ci
+          ready=0
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18788/healthz >/dev/null 2>&1; then ready=1; break; fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo "FAIL: /healthz never became ready"
+            docker logs growth-os-ci
+            docker rm -f growth-os-ci
+            exit 1
+          fi
+          curl -fsS http://127.0.0.1:18788/healthz
+          docker exec growth-os-ci node --experimental-sqlite --input-type=module -e '
+            import { DatabaseSync } from "node:sqlite";
+            const db = new DatabaseSync(process.env.GROWTH_SQLITE_PATH, { readOnly: true });
+            const versions = db.prepare("SELECT version FROM schema_migrations ORDER BY version").all();
+            const required = "015_order_number_sequence_repair";
+            if (!versions.some((r) => r.version === required)) {
+              console.error("FAIL: migration ledger is missing", required, versions);
+              process.exit(1);
+            }
+            const seq = db.prepare("SELECT next_value FROM order_number_sequence WHERE name = ?").all("order");
+            if (seq.length !== 1) {
+              console.error("FAIL: order_number_sequence row missing", seq);
+              process.exit(1);
+            }
+            console.log("OK: applied", versions.length, "migrations; order sequence", seq);
+            db.close();
+          '
+          docker logs growth-os-ci
+          docker rm -f growth-os-ci

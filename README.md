@@ -57,6 +57,28 @@ curl -X POST localhost:8788/api/v1/research/run -H 'content-type: application/js
   -d '{"topicId":"<topic_id>"}'
 ```
 
+## Deploy (self-hosted)
+
+The image follows the sibling Tier 0 shape (growth-agent / model-hub): multi-stage
+Node 22 build, non-root `node` user, SQLite under the `/data` volume, and the paired
+migrations applied automatically on boot. `GROWTH_API_TOKEN` is required, so the
+server refuses to start without it (fail-closed).
+
+```bash
+# sibling file: packages are supplied as Docker build contexts
+docker build \
+  --build-context zeusclient=../zeus/packages/zeus-client \
+  --build-context modelkit=../model-hub/packages/model-kit \
+  -t growth-os:local .
+
+# or let compose wire the contexts + env
+GROWTH_API_TOKEN=... docker compose up -d --build   # 127.0.0.1:8788
+```
+
+There is no automatic CD pipeline: publishing the image and deploying it still
+requires a target host and registry/SSH credentials. CI only builds the image and
+runs a boot smoke (process up + migrations applied).
+
 ## Verify
 
 ```bash

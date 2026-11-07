@@ -1,0 +1,75 @@
+# growth-os self-hosted stack, modelled on the growth-agent / model-hub Tier 0
+# deployments. Single-host docker compose; the app binds to loopback only and a
+# reverse proxy on the host (Caddy / nginx) terminates TLS.
+#
+# Default storage is SQLite under the growth-os-data volume; migrations apply
+# automatically on boot (dist/serve.js runs migrateUp before listening).
+# GROWTH_API_TOKEN is required at boot (fail-closed), so compose refuses to
+# start without it instead of crash-looping: export it or put it in `.env`.
+#
+#   docker compose up -d --build
+#
+# Postgres path: GROWTH_DB_DRIVER=postgres + DATABASE_URL. The postgres service
+# below is opt-in (`--profile postgres`); when using it, point DATABASE_URL at
+# postgres:5432 and keep the app's GROWTH_DB_DRIVER=postgres.
+services:
+  growth-os:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      additional_contexts:
+        # file: sibling packages consumed by package.json; see Dockerfile.
+        zeusclient: ../zeus/packages/zeus-client
+        modelkit: ../model-hub/packages/model-kit
+    image: growth-os:latest
+    container_name: growth-os
+    env_file:
+      - {path: .env, required: false}
+    environment:
+      GROWTH_HOST: 0.0.0.0
+      GROWTH_PORT: 8788
+      GROWTH_DB_DRIVER: sqlite
+      GROWTH_SQLITE_PATH: /data/growth-os.db
+      GROWTH_API_TOKEN: ${GROWTH_API_TOKEN:?set GROWTH_API_TOKEN before starting growth-os}
+    volumes:
+      - growth-os-data:/data
+    ports:
+      # Loopback only; the reverse proxy exposes 80/443 publicly.
+      - "127.0.0.1:8788:8788"
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Optional Postgres deployment path (repo supports both dialects). Not started
+  # by default: docker compose --profile postgres up -d --build
+  postgres:
+    image: pgvector/pgvector:pg16
+    profiles: ["postgres"]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-growth}
+      # Required with the postgres profile; leaving it empty makes the postgres
+      # image refuse to initialize instead of silently accepting blank auth.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      POSTGRES_DB: ${POSTGRES_DB:-growth_os}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - growth-os-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-growth} -d ${POSTGRES_DB:-growth_os}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  growth-os-data:
+  growth-os-pgdata:

@@ -2,7 +2,9 @@
 
 > **2026-11-06 补登：dev → main 已于 2026-11-05 经 PR #12 合并（合并前 CI 全绿）；实测 origin/main 与 origin/dev 内容完全一致（git diff 为空）。**
 
-> **2026-11-06 上线四件套（代码侧可做部分）**：`package.json` 补 `pg@^8` 运行时依赖（不装 `@types/pg`：`src/storage/postgres/postgres-driver.ts` 保留结构化类型 + `@ts-expect-error`，装了反而会因指令未使用而 typecheck 失败）；014 双方言复核为天然幂等（`CREATE TABLE IF NOT EXISTS` + `INSERT OR IGNORE` / `ON CONFLICT DO NOTHING`），未改动；新增 `scripts/fix-sequence-seeds.sql`（`order_number_sequence` 按 `MAX(order_no)` 只上调、`growth_event_sequence` 条件 `setval`、含预检与逐条验收查询）。验证：迁移配对 14 对、typecheck、lint、31 文件/212 用例、build 全绿；`migrate:pg:status` 已能走到连接阶段（无库时为 `ECONNREFUSED`）。生产仍待人工：停服 → 跑 014 → 执行该 SQL → 配 `GROWTH_MCP_TOKEN`。
+> **2026-11-07 订单序列修复迁移化**：新增 `015_order_number_sequence_repair` 双方言迁移，把原先独立脚本的修复逻辑并入迁移 runner：`INSERT ... ON CONFLICT DO NOTHING` / `INSERT OR IGNORE` 兜底建行，`UPDATE ... GREATEST(next_value, MAX(order_no 后缀))` 只升不降，`order_no` 仅接受 `ORD-<数字>`。迁移无 schema 变更、可重复执行，由 `src/serve.ts` 启动时自动应用；不再需要人工 SQL。**审计**：部署重启前先记录旧 `next_value`（`SELECT name, next_value FROM order_number_sequence WHERE name = 'order';`）并写进发布记录。**回滚**：不回退计数器，015 视为 forward-only。原 `scripts/fix-sequence-seeds.sql` 已删除，避免两套玩法并存；`scripts/preflight-014-order-sequence.sql` 保留为只读审计/预检。`growth_event_sequence` 经跨仓检索确认在 000mycodes 全仓零代码消费方（仅旧文档提及），已从预检与 runbook 移除，不做迁移。
+
+> **2026-11-06 上线四件套（代码侧可做部分）**：`package.json` 补 `pg@^8` 运行时依赖（不装 `@types/pg`：`src/storage/postgres/postgres-driver.ts` 保留结构化类型 + `@ts-expect-error`，装了反而会因指令未使用而 typecheck 失败）；014 双方言复核为天然幂等（`CREATE TABLE IF NOT EXISTS` + `INSERT OR IGNORE` / `ON CONFLICT DO NOTHING`），未改动。验证：迁移配对 14 对、typecheck、lint、31 文件/212 用例、build 全绿；`migrate:pg:status` 已能走到连接阶段（无库时为 `ECONNREFUSED`）。生产仍待人工：停服 → 跑 014 → 配 `GROWTH_MCP_TOKEN`；种子偏小改由 015 在启动时自动修复。
 
 > **2026-11-06 加固补登**：`scripts/migrate.mjs` 的 Postgres 连接失败改为带错误码与修复建议的可读提示（不再裸抛 `ECONNREFUSED`）；CI 新增 `migrate:pg:status` 预检步骤，无 `GROWTH_DATABASE_URL` 时跳过而非失败；新增 `scripts/preflight-014-order-sequence.sql`，并在下方补 014 执行前预检与回滚预案。
 
@@ -15,14 +17,15 @@
 1. 跑 `scripts/preflight-014-order-sequence.sql`（Postgres；SQLite 用文末等价查询）。
 2. P0 看 `011/013/014` 的 `schema_migrations` 记录；P5a 判断账本与 `order_number_sequence` 是否一致；P5b 判断种子值与 `MAX(order_no)`。
 3. 判定口径：`next_value == max_order_seq` 健康（下一次分配 = max + 1）；`>` 只会跳号，安全；`<` 为污染，下一次分配迟早撞上已有单号。
-4. `growth_event_sequence` 不是本仓迁移创建的对象：P6 只确认存在性与当前值；归属表确认前不要 `setval`。
+4. `growth_event_sequence` 不是本仓迁移创建的对象，000mycodes 全仓也无任何代码消费方（2026-11-07 复核，仅旧文档提及）。已从预检与 runbook 移除，不再做 `setval`，也不纳入迁移。
 
 **序列污染的判断与修复**：
 
 - `order_number_sequence.next_value < MAX(order_no 的 ORD- 数字后缀)` → 污染（014 用 `COUNT(*)` 播种，删单/跳号后会偏小）。
 - `orders.order_no` 出现重复行（011 的 UNIQUE 本应阻止）→ 先查是否曾绕过约束写入。
 - `order_no` 不符合 `ORD-<数字>` → 预检单列 malformed 计数，不参与 MAX 计算。
-- 修复只允许上调：`scripts/fix-sequence-seeds.sql` 用 `GREATEST`，重复执行不降值；修完重跑 P5b 应为 `OK`。
+- 修复只允许上调：`015_order_number_sequence_repair` 用 `GREATEST` / `MAX`，重复执行不降值，服务启动时自动应用；修完重跑 P5b 应为 `OK`。
+- 审计与回滚：重启前记录旧 `next_value`；回滚不降低计数器，015 视为 forward-only（降低会重新引入撞号）。
 
 **回滚预案**：
 
@@ -75,7 +78,7 @@
 - **定级**：growth-os 已登记 bayjf `docs/PROJECT-TIER-CONVENTION.md` Tier 0。
 - **注意**：本机默认 shell node 20 跑不了测试（`node:sqlite` 需 22.5+），用 `fnm use 22` 后再跑五门。
 
-- **基线**：31 个测试文件 / **212 用例全绿**（2026-11-04 Node 22.23.4 实跑）；`typecheck` 0 错；`lint` 0 错；`tsc -p tsconfig.build.json` 构建出 `dist/`；sqlite + postgres 迁移各 14 份（`001_research`、`002_crm`、`003_outreach`、`004_outreach`、`005_match`、`006_contact_email`、`007_callback_events`、`008_lead_import`、`009_outreach_locale`、`010_sales_quotes`、`011_sales_contracts_orders`、`012_order_fulfillment_invoices`、`013_orders_contract_unique`、`014_order_number_sequence`，配对）。
+- **基线**：33 个测试文件 / **226 用例全绿**（2026-11-07 Node 22.23.4 实跑）；`typecheck` 0 错；`lint` 0 错；`tsc -p tsconfig.build.json` 构建出 `dist/`；sqlite + postgres 迁移各 15 份（`001_research` 至 `014_order_number_sequence` 及 `015_order_number_sequence_repair`，配对）；Docker 镜像本地构建 + 启动冒烟通过（15 条迁移全部应用，`/healthz` 200）。
 - **G1 已落码并实测通过**：
   - 只读搜索连接器 `research/provider/`：`OfflineSearchProvider`（确定性回放 `recordings/search/fixtures.json`，默认）、`OnlineSearchProvider`（Tavily 风格 REST，POST /search 只读）、`registry`（online 缺凭据 → 拒绝型 provider，run 返回 422，**不静默回退离线**）。
   - 信号引擎：`collector.ts`（规范化 + 指纹去重，指纹 = sha256(规范化 URL) 截 16）、`scoring.ts`（0–100 确定性打分，类型/来源/新鲜度/关键词四项加权，分项可解释，新鲜度半衰期 30 天、无日期取中性 0.5）。
