@@ -28,7 +28,7 @@ services:
     environment:
       GROWTH_HOST: 0.0.0.0
       GROWTH_PORT: 8788
-      GROWTH_DB_DRIVER: sqlite
+      GROWTH_DB_DRIVER: ${GROWTH_DB_DRIVER:-sqlite}
       GROWTH_SQLITE_PATH: /data/growth-os.db
       GROWTH_API_TOKEN: ${GROWTH_API_TOKEN:?set GROWTH_API_TOKEN before starting growth-os}
     volumes:
