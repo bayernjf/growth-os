@@ -7,8 +7,12 @@
 --     或账本已记但表缺失）；
 --   * 种子值与历史单号不一致（COUNT(*) 播种偏小，下一次分配会撞上已有单号）。
 --
--- 判读顺序：P0 → P1 → P4 → P5。P5 的 verdict 为 STOP 时不要执行 014/修复脚本，
--- 先按提示处理。修复使用 scripts/fix-sequence-seeds.sql（只上调、不下调）。
+-- 判读顺序：P0 → P1 → P4 → P5。P5 的 verdict 为 STOP 时不要执行 014，先按提示处理。
+-- 种子偏小由 015_order_number_sequence_repair 在服务启动时自动修复（只上调、不下调），
+-- 不再需要人工执行独立修复脚本。
+--
+-- 审计：P1 的 next_value 就是 015 执行前的旧值。部署重启前先记录它（写进发布记录），
+-- 因为服务启动后 015 已应用，旧值不再可观测。
 
 -- P0) 账本是否存在，以及 011（orders）/013/014 的登记状态。
 SELECT to_regclass('public.schema_migrations') AS schema_migrations_table;
@@ -102,21 +106,12 @@ SELECT next_value,
          WHEN next_value = -1
            THEN 'STOP: order row missing; run the 014 seed insert'
          WHEN next_value < max_order_seq
-           THEN 'STOP: seed < MAX(order_no); next allocation would collide. Run scripts/fix-sequence-seeds.sql'
+           THEN 'STOP: seed < MAX(order_no); 015_order_number_sequence_repair raises it on the next boot. Record the old next_value for the audit first'
          WHEN next_value > max_order_seq
            THEN 'OK: applied; seed > MAX (numbering gaps only, no collisions)'
          ELSE 'OK: applied; seed == MAX(order_no), next allocation is safe'
        END AS verdict
   FROM seed;
-
--- P6) 可选：生产库若存在 growth_event_sequence（本仓迁移不创建），一并看当前值。
---     归属表可用 fix-sequence-seeds.sql 的 P4 查询确认；确认前不要 setval。
-SELECT schemaname,
-       sequencename,
-       COALESCE(last_value, 0) AS last_value,
-       is_called
-  FROM pg_sequences
- WHERE sequencename = 'growth_event_sequence';
 
 -- =============================================================================
 -- 附：SQLite 生产形态的等价预检（无 to_regclass / FILTER / 正则 ~）
