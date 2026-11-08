@@ -17,7 +17,9 @@
     "migrate:status": "node --experimental-sqlite scripts/migrate.mjs status",
     "migrate:pg:up": "node scripts/migrate.mjs up --driver postgres",
     "migrate:pg:status": "node scripts/migrate.mjs status --driver postgres",
-    "check:migrations": "bash scripts/check-migrations.sh"
+    "check:migrations": "bash scripts/check-migrations.sh",
+    "backup": "node --experimental-sqlite scripts/backup-growth-os.mjs",
+    "restore": "node --experimental-sqlite scripts/restore-growth-os.mjs"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.0",
