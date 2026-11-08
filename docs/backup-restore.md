@@ -129,13 +129,30 @@ volume should be restored into a temporary path and checked the same way.
 
 ## 6. Code rollback anchor
 
-Images are built locally as `growth-os:latest`; no registry tag is published.
-Keep the previous build before a rebuild, then retag it back to roll out:
+Images are built locally; there is no registry. Keep the **previous 3** tagged
+builds before replacing `latest`:
 
 ```bash
-docker tag growth-os:latest "growth-os:$(date -u +%Y%m%d-%H%M)"    # before a rebuild
-docker tag "growth-os:<stamp>" growth-os:latest && docker compose up -d   # roll back
+# before a rebuild: tag the running image with a UTC stamp
+docker tag growth-os:latest "growth-os:$(date -u +%Y%m%d-%H%M)"
+# roll back: pin compose to a kept tag
+GROWTH_OS_IMAGE_TAG=20261108-1400 docker compose up -d growth-os
 ```
 
-This anchor only exists on the machine that holds the image. After moving
-hosts, save/export the image or push it to a registry first.
+Retention: 3 tags (current + 2 previous). Delete older tags manually with
+`docker image rm growth-os:<stamp>`.
+
+**When this path fails**
+
+- The tag lives only in the local Docker daemon. After moving hosts, or after
+  `docker image prune`, the tag is gone and rollback is impossible.
+- `GROWTH_OS_IMAGE_TAG` defaults to `latest`, which is whatever was built last.
+  A deploy without pinning is not a rollback anchor: always set the stamp
+  explicitly when rolling back, and record the stamp used for each release.
+- For cross-host rollback, export the image first:
+  `docker save growth-os:<stamp> | gzip > growth-os-<stamp>.tar.gz`, keep it
+  off the host, then `docker load` on the target. This is still not equivalent
+  to a registry with immutable digests.
+
+The database rollback path is separate (restore a snapshot, see above); the
+image tag only rolls back code.
