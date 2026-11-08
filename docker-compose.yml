@@ -43,6 +43,32 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # Daily SQLite snapshot sidecar. Mounts the data volume read-only and writes
+  # VACUUM INTO snapshots to the `backups` volume; see docs/backup-restore.md.
+  # A failed snapshot exits non-zero so `docker compose ps` cannot report a
+  # healthy container while backups have silently stopped.
+  db-backup:
+    image: node:22-slim
+    environment:
+      GROWTH_SQLITE_PATH: /data/growth-os.db
+      BACKUP_DIR: /backups
+      RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+    volumes:
+      - growth-os-data:/data:ro
+      - ./scripts:/scripts:ro
+      - ./deploy/db-backup.sh:/entrypoint.sh:ro
+      - backups:/backups
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    depends_on:
+      growth-os: {condition: service_healthy}
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   # Optional Postgres deployment path (repo supports both dialects). Not started
   # by default: docker compose --profile postgres up -d --build
   postgres:
@@ -73,3 +99,4 @@ services:
 volumes:
   growth-os-data:
   growth-os-pgdata:
+  backups:
