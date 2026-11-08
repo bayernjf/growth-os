@@ -21,7 +21,7 @@ services:
         # file: sibling packages consumed by package.json; see Dockerfile.
         zeusclient: ../zeus/packages/zeus-client
         modelkit: ../model-hub/packages/model-kit
-    image: growth-os:latest
+    image: growth-os:${GROWTH_OS_IMAGE_TAG:-latest}
     container_name: growth-os
     env_file:
       - {path: .env, required: false}
