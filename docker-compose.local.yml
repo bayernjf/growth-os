@@ -1,0 +1,19 @@
+# Local-only overrides. Joins the shared Tier 0 network and switches the zeus
+# integration to online so the kernel is actually called instead of the offline
+# deterministic client.
+#
+# Usage: docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
+networks:
+  tier0-net:
+    external: true
+
+services:
+  growth-os:
+    networks:
+      - default
+      - tier0-net
+    environment:
+      GROWTH_ZEUS_MODE: online
+      GROWTH_ZEUS_BASE_URL: http://zeus:8787
+      # Must match ZEUS_INTERNAL_TOKEN on the kernel. Throwaway local value.
+      GROWTH_ZEUS_TOKEN: local-dev-internal-token-16chars
