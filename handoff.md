@@ -1,5 +1,22 @@
 # growth-os handoff
 
+> **2026-11-11 只读实测：服务健康、鉴权正确、业务库全空（零写入）。**
+> 本地 `127.0.0.1:8788`（容器 healthy，Up 21h）。本轮只发 GET，未 seeding、未跑采集。
+>
+> - **无凭证 13 个 GET**：`/healthz` 200 `{"ok":true}`，其余 **12 个全 401**
+>   `{"code":"UNAUTHORIZED","message":"missing or invalid token"}` ⇒ fail-closed 成立。
+> - **带 `GROWTH_API_TOKEN`（len 31，`.env` 自述为本地一次性值）**：11 个列表口全 **200 但返回 `[]`**
+>   ——crm contacts / leads / watch·due、match demands / offers / matches、research topics、
+>   sales quotes / orders、outreach campaigns / suppressed，**一个业务对象都没有**；
+>   仓库 `data/` 目录也是空的。第 12 个 `/api/v1/research/signals` 返回 **400
+>   `topicId query is required`**（`src/api/research-http.ts:60` 显式必填，不是缺陷）。
+> - **负控**：无令牌 401、伪造令牌 401、不存在的 id 404
+>   `contact does-not-exist-000 not found` ⇒ 鉴权与 404 语义都对。
+> - **结论口径**：不能记成"功能已验证"。**已验证的是"服务活着＋鉴权正确＋空态正确"**；
+>   详情口（`/leads/:id/events`、`/sales/orders/:id/invoice`、`/match/matches/:id/introduction` 等）
+>   本轮**无法覆盖**——没有真实 id 可用，造数据属写操作，超出本轮只读范围。
+>   要真验业务链路，得先决定用哪条路径灌入初始数据。
+
 > **2026-11-06 补登：dev → main 已于 2026-11-05 经 PR #12 合并（合并前 CI 全绿）；实测 origin/main 与 origin/dev 内容完全一致（git diff 为空）。**
 
 > **2026-11-07 订单序列修复迁移化**：新增 `015_order_number_sequence_repair` 双方言迁移，把原先独立脚本的修复逻辑并入迁移 runner：`INSERT ... ON CONFLICT DO NOTHING` / `INSERT OR IGNORE` 兜底建行，`UPDATE ... GREATEST(next_value, MAX(order_no 后缀))` 只升不降，`order_no` 仅接受 `ORD-<数字>`。迁移无 schema 变更、可重复执行，由 `src/serve.ts` 启动时自动应用；不再需要人工 SQL。**审计**：部署重启前先记录旧 `next_value`（`SELECT name, next_value FROM order_number_sequence WHERE name = 'order';`）并写进发布记录。**回滚**：不回退计数器，015 视为 forward-only。原 `scripts/fix-sequence-seeds.sql` 已删除，避免两套玩法并存；`scripts/preflight-014-order-sequence.sql` 保留为只读审计/预检。`growth_event_sequence` 经跨仓检索确认在 000mycodes 全仓零代码消费方（仅旧文档提及），已从预检与 runbook 移除，不做迁移。
