@@ -1,5 +1,13 @@
 # growth-os handoff
 
+## 待办登记（标准）
+
+> 本段是本产品唯一活跃待办入口；详细背景见下方原有章节。完成一项改 `[x]`，并在“最近变更 / Recently shipped”留证据。
+> 最近同步：2026-11-19
+
+- [ ] **G4 运营化（外部依赖）** — 状态：blocked；下一步：真实云/域名/密钥/合规，含 SPF/DKIM/DMARC 与跨境数据评估。
+- [ ] **T-G2-05 回访 watch 真实化** — 状态：open；下一步：按已拍板 connector 方案做跨仓 onboarding（`crm.listDueFollowups` → zeus connector 声明/握手 → watch + budget + plan intent）。
+
 > **2026-11-11 只读实测：服务健康、鉴权正确、业务库全空（零写入）。**
 > 本地 `127.0.0.1:8788`（容器 healthy，Up 21h）。本轮只发 GET，未 seeding、未跑采集。
 >
