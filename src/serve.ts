@@ -35,6 +35,8 @@ import { SalesService, type LeadCustomerLookup } from './sales/sales-service.js'
 import { SalesDecisionGate } from './sales/decision.js';
 import { createSalesApp } from './api/sales-http.js';
 import { assertFailClosedBoot, assertMailCompliance, authPosture } from './util/boot.js';
+import { GrowthMetricsService } from './observability/prometheus.js';
+import { createMetricsApp } from './api/metrics-http.js';
 
 async function createDriver(): Promise<StorageDriver> {
   const config = loadConfig();
@@ -134,6 +136,7 @@ async function main(): Promise<void> {
   });
 
   const app = new Hono();
+  app.route('/', createMetricsApp({ service: new GrowthMetricsService(driver) }));
   app.route('/', createResearchApp({ service: researchService, apiToken: config.apiToken }));
   app.route('/', createCrmApp({ service: crmService, apiToken: config.apiToken }));
   app.route('/', createLeadImportApp({ service: crmService, apiToken: config.apiToken }));
