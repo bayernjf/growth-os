@@ -3,10 +3,10 @@
 ## 待办登记（标准）
 
 > 本段是本产品唯一活跃待办入口；详细背景见下方原有章节。完成一项改 `[x]`，并在“最近变更 / Recently shipped”留证据。
-> 最近同步：2026-11-19
+> 最近同步：2026-11-22
 
 - [ ] **G4 运营化（外部依赖）** — 状态：blocked；下一步：真实云/域名/密钥/合规，含 SPF/DKIM/DMARC 与跨境数据评估。
-- [ ] **T-G2-05 回访 watch 真实化** — 状态：open；下一步：按已拍板 connector 方案做跨仓 onboarding（`crm.listDueFollowups` → zeus connector 声明/握手 → watch + budget + plan intent）。
+- [x] **T-G2-05 回访 watch 真实化** — 已完成（2026-11-22）：`scripts/onboard-zeus-watch.mjs` 修复 zeus 契约漂移（`realm` → `dataDomain`）、MCP token 必填与重复 watch 幂等；真实 E2E 跑通 `crm.listDueFollowups` → connector 握手 → `watch-tick` → `review` plan intent（参考执行体 completed），完成 followup 后 `dueCount=0`、watch 不再触发。证据 `/tmp/growth-watch-e2e/`。
 
 > **2026-11-11 只读实测：服务健康、鉴权正确、业务库全空（零写入）。**
 > 本地 `127.0.0.1:8788`（容器 healthy，Up 21h）。本轮只发 GET，未 seeding、未跑采集。
@@ -95,7 +95,7 @@
   - **H3 typecheck 修红**：`tests/mcp-http.test.ts` fixture 用显式结构类型（提交 897ded5，无 any/@ts-ignore）。
   - 验证门五项全绿（18 文件 / 104 用例）；无 token 拒启与姿态日志已真实启动冒烟复核。
   - 本批未做两项已在 2026-10-31 追补批次收尾：500 回显驱动错误文本、lead 状态+审计同事务（H4），见上方追补批次。
-  - **边界**：T-G2-05 预定落码形状（zeus watch connector / `watch_reminders` 表）按拍板**未提前实现**。
+  - **边界**：T-G2-05 预定落码形状（zeus watch connector / `watch_reminders` 表）按拍板**未提前实现**；该边界已于 2026-11-22 以 connector 方案跨越，见「T-G2-05 回访 watch 真实化」。
 - **GATE-G2 已过门**（2026-10-25，owner 复核）：五门全绿（38 用例/6 文件、typecheck/lint/build/迁移配对 0 错，node 22 复核）；真实服务冒烟 **16/16**（15 信号→1 线索[分数与源信号一致、带证据]→状态机合法流转+非法 409→promote 幂等→followup 到期进 watch/due、完成后消失→lead_events 审计 1 条）。
 - **G3 已签核（2026-10-25 owner），已落码并过门**：邮件通道 **SMTP 优先**（厂商中立、全球可用；Gmail/飞书后续适配器）。详细设计见 bayjf `docs/tier0/growth-os-设计方案.md` v1.2 §13。T-G3-01（zeus-client DecisionPort）、T-G3-02（MailPort + SMTP 适配器）、T-G3-03/04（campaign 草稿 + zeus 签核发送流）、T-G3-05（回执跟踪/suppress）、T-G3-06（GATE-G3）已落码；**GATE-G3 已过门**。
 - **G5 撮合引擎（2026-10-25）已落码并过门**：`match/`（买方需求/卖方货源/匹配对 + 信号结构化 + 五维打分 + 编排 + 撮合介绍/联系）+ `005_match` + `006_contact_email` 迁移；真实服务冒烟 **10/10**（healthz→建需求/货源→run 匹配 1 对 score 90→reasons 可解释→介绍渲染→联系路由→accept）。
@@ -210,17 +210,12 @@
 - [x] G5 撮合引擎（T-G5-01~05 全部完成：数据模型/结构化/匹配/API/闭环）。
 - [ ] G4 运营化（外部依赖：真实云/域名/密钥/合规；含 SPF/DKIM/DMARC 与跨境数据评估）。
 - [x] Tier0 评审 P2 挂账（2026-10-30 报告）——已收尾（2026-10-31 追补批次）：非 GrowthError 的 500 回显改为泛化 `INTERNAL` 体、原文只进日志（`src/api/on-error.ts` 统一接入四个 HTTP 应用）；lead 状态写与 `lead_events` 审计收进同一事务（H4，PR #2，`CrmRepository.transitionLeadStatus` + `StorageDriver.transaction`）。
-- [ ] T-G2-05 回访 watch 真实化 —— **2026-10-27 复核挂账**（growth-os 仓零代码改动；基线 14 文件/84 用例全绿复核通过，HEAD d9490f7）。
-  - 只读核对 zeus（未改 zeus 仓）：watch 触发面已 boot 装配——`POST/GET/DELETE /api/watches`、`POST /api/watch-tick`（bearer、caller 驱动节拍，内核不持定时器；zeus `src/http/server.ts` ~L2644-2770、`src/state/boot.ts` 装配 WatchRegistry + runWatchTick）；watch 读数源仅三：`metrics`（zeus 内核自指标）、`realm`（仅 entryCount / lastItemModifiedAt 两个元数据）、`connector`（须握手注册的声明工具，出站走 zeus 守卫）。`packages/zeus-client` 只导出 Decision API v1，无 watch/realm/intent 面。
-  - 结论：growth-os 的 CRM followup 对 zeus tick 完全不可见，单仓离线无法闭合「由 zeus tick 驱动到期提醒」：(a) growth-os 不是 zeus connector（缺声明/握手接入，跨仓）；(b) realm 读数无逐条 due 语义，即便能 push 条目也表达不了「followup F 到期」；(c) 唯一能写提醒的 `POST /api/intents` 是 skill dispatch 门（tier-1 对未注册 skill 拒 403 skill_unavailable），不是人审提醒登记口，growth-os 在 zeus 无注册 skill。
-  - 落码前置（bayjf tier0 设计稿拍板二选一）：
-    ✅ **已拍板（2026-10-29，owner）：选项 2——growth-os 以 connector 接入**
-    （watch-native 长路径：growth-os 暴露 `crm.listDueFollowups` 只读工具 →
-    zeus connector 声明/握手 → 注册 `source=connector` watch + budget +
-    plan intent；需跨仓 onboarding 设计）。选项 1「zeus 新增 bearer reminders
-    登记面」已否决。
-  - 闭合后 growth-os 侧预定落码形状（勿提前写）：ZeusWatchAdapter 包 LocalWatch（本地到期判定为唯一事实源）+ `GROWTH_ZEUS_MODE=off` 默认 fail-closed + 007 幂等表 `watch_reminders(followup_id unique, external_id, raised_at, resolved_at)`（sqlite+postgres 双方言，防重复 tick 重复上报）+ 注入 fetch 的裸 bearer client（离线 fake zeus 测试）。
-  - DelegationContract 非阻塞：plan 模式人审提醒本就不需要契约；execute 无人值守提醒的 `delegationId` 登记面 zeus 已就绪（`POST /api/watches` 接受 delegationId，execute fire 派生一次性子票）。
+- [x] T-G2-05 回访 watch 真实化 —— 已完成（2026-11-22，跨仓 onboarding + 真实 E2E）。
+  - growth-os 侧：`POST /mcp` 暴露唯一只读工具 `crm.listDueFollowups`，返回顶层 `dueCount + followups`；`GROWTH_MCP_TOKEN` fail-closed，错误 token 401。`scripts/onboard-zeus-watch.mjs` 修复 zeus 契约漂移（`realm` → `dataDomain`）、MCP token 必填、connector/ watch 双幂等，并补 `tests/onboard-zeus-watch.test.ts`。
+  - zeus 侧无需改码：声明 `growth-os` connector → 握手发现 `crm.listDueFollowups` → 注册 `dataDomain=personal`、`source=connector`、`field=dueCount`、`present`、`budget.fires=3` 的 watch。
+  - 真实 E2E（隔离 DB/状态）：先播种 2 条到期 followup，`watch-tick` 读到 `dueCount=2`，触发 `review` plan intent，参考 A2A 执行体为 `completed`；第二次 tick 仍因到期触发（`used.fires` 0→2）；完成 2 条 followup 后 `dueCount=0`，下一次 tick 不触发（`used.fires` 保持 2，`lastValue=0`）。复跑 onboarding 实际跳过 connector/watch，watch 仍只有 1 条。
+  - 语义说明：选项 2 是 zeus “只读、不判定”，`LocalWatch` 仍是到期唯一事实源；不引入 `ZeusWatchAdapter` / `watch_reminders` 幂等表（那是选项 1 的形状，已随拍板取消）。防重复由 zeus 的 `used.fires` 预算与确定性 intent id 承担。
+  - 证据：`/tmp/growth-watch-e2e/`（`tick-1.json` / `tick-2.json` / `tick-3.json` / `watches-after-*.json` / `intent-1.json` / `audit-after-tick.json` / `onboard-first.log` / `onboard-second.log`）。
 
 ## 环境/运行
 
