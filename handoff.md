@@ -5,7 +5,14 @@
 > 本段是本产品唯一活跃待办入口；详细背景见下方原有章节。完成一项改 `[x]`，并在“最近变更 / Recently shipped”留证据。
 > 最近同步：2026-11-22
 
-- [ ] **G4 运营化（外部依赖）** — 状态：blocked；下一步：真实云/域名/密钥/合规，含 SPF/DKIM/DMARC 与跨境数据评估。
+<!-- tier0:todos v1 -->
+| id | title | status | priority | owner | next | evidence | updated |
+|---|---|---|---|---|---|---|---|
+| GO-01 | G4 运营化（外部依赖） | blocked | p1 | external | 真实云/域名/密钥/合规，含 SPF/DKIM/DMARC 与跨境数据评估 | - | 2026-11-22 |
+<!-- /tier0:todos -->
+
+### 已完成（历史）
+
 - [x] **T-G2-05 回访 watch 真实化** — 已完成（2026-11-22）：`scripts/onboard-zeus-watch.mjs` 修复 zeus 契约漂移（`realm` → `dataDomain`）、MCP token 必填与重复 watch 幂等；真实 E2E 跑通 `crm.listDueFollowups` → connector 握手 → `watch-tick` → `review` plan intent（参考执行体 completed），完成 followup 后 `dueCount=0`、watch 不再触发。证据 `/tmp/growth-watch-e2e/`。
 
 > **2026-11-11 只读实测：服务健康、鉴权正确、业务库全空（零写入）。**
@@ -34,6 +41,7 @@
 > **2026-11-06 加固补登**：`scripts/migrate.mjs` 的 Postgres 连接失败改为带错误码与修复建议的可读提示（不再裸抛 `ECONNREFUSED`）；CI 新增 `migrate:pg:status` 预检步骤，无 `GROWTH_DATABASE_URL` 时跳过而非失败；新增 `scripts/preflight-014-order-sequence.sql`，并在下方补 014 执行前预检与回滚预案。
 
 > 状态主入口。开工前先读；每完成一个工作单元立即更新（已完成划掉、待办保留）。
+
 
 ## 014_order_number_sequence 执行前预检与回滚预案（2026-11-06）
 
